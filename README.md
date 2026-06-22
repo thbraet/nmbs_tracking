@@ -3,6 +3,8 @@
 Live dashboard + automatic daily delay log for the **direct** Diest → Halle
 train (the hourly IC 17xx service), built on the open [iRail API](https://docs.irail.be/).
 
+**🌐 Live dashboard:** https://thbraet.github.io/nmbs_tracking/
+
 ## Contents
 
 | File | What it is |
