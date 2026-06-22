@@ -7,8 +7,8 @@
     "on_time": 5,
     "late": 6,
     "on_time_pct": 45,
-    "avg_arr_delay_min": 2.55,
-    "max_arr_delay_min": 13
+    "avg_arr_delay_min": 2.82,
+    "max_arr_delay_min": 16
   },
   "trips": [
     {
@@ -117,8 +117,8 @@
       "train": "IC 1737",
       "platform": "1",
       "dep_delay_min": 0,
-      "arr_delay_sec": 780,
-      "arr_delay_min": 13,
+      "arr_delay_sec": 960,
+      "arr_delay_min": 16,
       "canceled": false
     }
   ]
