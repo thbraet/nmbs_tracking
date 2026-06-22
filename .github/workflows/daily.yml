@@ -1,0 +1,40 @@
+name: Daily Diest→Halle train log
+
+on:
+  schedule:
+    # 21:45 UTC = 23:45 Brussels (summer) / 22:45 Brussels (winter).
+    # Late enough to capture (almost) the whole day, but always still "today"
+    # in Brussels so iRail's same-day real-time delays are available.
+    - cron: "45 21 * * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+permissions:
+  contents: write          # needed to commit the updated log back to the repo
+
+concurrency:
+  group: daily-log
+  cancel-in-progress: false
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --quiet certifi
+
+      - name: Fetch today's direct Diest→Halle trips
+        run: python fetch_log.py
+
+      - name: Commit updated log
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add log/
+          git diff --staged --quiet || git commit -m "Daily log: $(TZ=Europe/Brussels date +%F)"
+          git push

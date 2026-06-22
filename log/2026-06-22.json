@@ -1,0 +1,125 @@
+{
+  "date": "2026-06-22",
+  "route": "Diest -> Halle (direct)",
+  "summary": {
+    "total_trips": 11,
+    "cancelled": 0,
+    "on_time": 5,
+    "late": 6,
+    "on_time_pct": 45,
+    "avg_arr_delay_min": 2.55,
+    "max_arr_delay_min": 13
+  },
+  "trips": [
+    {
+      "dep_unix": 1782098880,
+      "dep_time": "05:28",
+      "train": "IC 1727",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 0,
+      "arr_delay_min": 0,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782102480,
+      "dep_time": "06:28",
+      "train": "IC 1728",
+      "platform": "1",
+      "dep_delay_min": 1,
+      "arr_delay_sec": 0,
+      "arr_delay_min": 0,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782106080,
+      "dep_time": "07:28",
+      "train": "IC 1729",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 480,
+      "arr_delay_min": 8,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782109680,
+      "dep_time": "08:28",
+      "train": "IC 1730",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 120,
+      "arr_delay_min": 2,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782113280,
+      "dep_time": "09:28",
+      "train": "IC 1731",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 180,
+      "arr_delay_min": 3,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782116880,
+      "dep_time": "10:28",
+      "train": "IC 1732",
+      "platform": "1",
+      "dep_delay_min": 2,
+      "arr_delay_sec": 120,
+      "arr_delay_min": 2,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782120480,
+      "dep_time": "11:28",
+      "train": "IC 1733",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": -60,
+      "arr_delay_min": -1,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782124080,
+      "dep_time": "12:28",
+      "train": "IC 1734",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 60,
+      "arr_delay_min": 1,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782127680,
+      "dep_time": "13:28",
+      "train": "IC 1735",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 0,
+      "arr_delay_min": 0,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782131280,
+      "dep_time": "14:28",
+      "train": "IC 1736",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 0,
+      "arr_delay_min": 0,
+      "canceled": false
+    },
+    {
+      "dep_unix": 1782134880,
+      "dep_time": "15:28",
+      "train": "IC 1737",
+      "platform": "1",
+      "dep_delay_min": 0,
+      "arr_delay_sec": 780,
+      "arr_delay_min": 13,
+      "canceled": false
+    }
+  ]
+}
