@@ -1,4 +1,4 @@
-name: Daily Diest→Halle train log
+name: Daily NMBS train log
 
 on:
   schedule:
@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet certifi
 
-      - name: Fetch today's direct Diest→Halle trips
+      - name: Fetch today's direct trips for all routes
         run: python fetch_log.py
 
       - name: Commit updated log

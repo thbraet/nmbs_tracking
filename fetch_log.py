@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Fetch today's DIRECT Diest -> Halle train departures from the iRail API and
+"""Fetch today's DIRECT NMBS train departures for every tracked route and
 append them to a daily log.
 
+Tracked routes (both directions of each pair):
+  Diest <-> Halle
+  Diest <-> Brussels-North  (Brussel-Noord)
+  Diest <-> Brussels-Central (Brussel-Centraal)
+
 Writes two things under ./log/:
-  - <YYYY-MM-DD>.json : full detail + summary for that day
-  - history.csv       : one appended row per train per day (the long-term log)
+  - <YYYY-MM-DD>.json : full detail + summary for that day, keyed per route
+  - history.csv       : one appended row per train per day per route (the
+                        long-term log; carries a `route` column)
 
 iRail only keeps real-time delay values for the *current* day, so this script
 must run late in the evening (Brussels time) to capture a full day of trips.
@@ -16,14 +22,24 @@ import ssl
 import sys
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 BXL = ZoneInfo("Europe/Brussels")
 CONN_URL = "https://api.irail.be/v1/connections"
-FROM, TO = "Diest", "Halle"
 LOG_DIR = Path(__file__).resolve().parent / "log"
+
+# Each route: stable slug, the API station names, and a friendly label.
+# Slugs are also used by the dashboard to filter history.csv, so keep them stable.
+ROUTES = [
+    {"slug": "diest-halle",            "from": "Diest",            "to": "Halle"},
+    {"slug": "halle-diest",            "from": "Halle",            "to": "Diest"},
+    {"slug": "diest-brussels-north",   "from": "Diest",            "to": "Brussels-North"},
+    {"slug": "brussels-north-diest",   "from": "Brussels-North",   "to": "Diest"},
+    {"slug": "diest-brussels-central", "from": "Diest",            "to": "Brussels-Central"},
+    {"slug": "brussels-central-diest", "from": "Brussels-Central", "to": "Diest"},
+]
 
 # Verified TLS context (use certifi if available; falls back to system store).
 try:
@@ -33,20 +49,20 @@ except ImportError:
     SSL_CTX = ssl.create_default_context()
 
 
-def fetch(date_ddmmyy: str, time_hhmm: str) -> dict:
+def fetch(frm: str, to: str, date_ddmmyy: str, time_hhmm: str) -> dict:
     params = urllib.parse.urlencode({
-        "from": FROM, "to": TO, "date": date_ddmmyy, "time": time_hhmm,
+        "from": frm, "to": to, "date": date_ddmmyy, "time": time_hhmm,
         "timesel": "departure", "format": "json", "lang": "en",
     })
     req = urllib.request.Request(
         f"{CONN_URL}?{params}",
-        headers={"User-Agent": "diest-halle-tracker/1.0 (personal daily log)"},
+        headers={"User-Agent": "diest-tracker/1.0 (personal daily log)"},
     )
     with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
         return json.load(r)
 
 
-def collect_direct_trips(now: datetime) -> list[dict]:
+def collect_direct_trips(frm: str, to: str, now: datetime) -> list[dict]:
     """Paginate the connections endpoint across the whole day and return all
     DIRECT (0-transfer) trips that have already departed by `now`."""
     date_ddmmyy = now.strftime("%d%m%y")
@@ -56,7 +72,7 @@ def collect_direct_trips(now: datetime) -> list[dict]:
     last_dep = 0
 
     for _ in range(40):  # generous page guard
-        data = fetch(date_ddmmyy, cursor.strftime("%H%M"))
+        data = fetch(frm, to, date_ddmmyy, cursor.strftime("%H%M"))
         conns = data.get("connection", []) or []
         if not conns:
             break
@@ -107,51 +123,74 @@ def summarize(trips: list[dict]) -> dict:
     }
 
 
-def write_outputs(date_iso: str, trips: list[dict], summary: dict) -> None:
+CSV_COLS = ["date", "route", "from", "to", "dep_time", "train", "platform",
+            "dep_delay_min", "arr_delay_min", "arr_delay_sec", "canceled"]
+
+
+def write_outputs(date_iso: str, per_route: list[dict]) -> None:
+    """per_route: list of {route, from, to, trips, summary} for the day."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Per-day JSON (overwrite — represents the final snapshot for that day).
+    # Per-day JSON (overwrite — the final snapshot for that day, keyed per route).
     day_file = LOG_DIR / f"{date_iso}.json"
     day_file.write_text(json.dumps(
-        {"date": date_iso, "route": f"{FROM} -> {TO} (direct)",
-         "summary": summary, "trips": trips},
+        {"date": date_iso,
+         "routes": {r["route"]: {"from": r["from"], "to": r["to"],
+                                 "summary": r["summary"], "trips": r["trips"]}
+                    for r in per_route}},
         indent=2, ensure_ascii=False))
 
-    # Upsert per-trip rows into the long-term history CSV (idempotent per day:
-    # any existing rows for `date_iso` are replaced, so re-runs never duplicate).
+    # Upsert per-trip rows into the long-term history CSV. One run regenerates the
+    # whole day across all routes, so we drop every existing row for `date_iso`
+    # and re-add the fresh ones (idempotent — re-runs never duplicate).
     hist = LOG_DIR / "history.csv"
-    cols = ["date", "dep_time", "train", "platform",
-            "dep_delay_min", "arr_delay_min", "arr_delay_sec", "canceled"]
     kept = []
     if hist.exists():
         with hist.open(newline="") as f:
-            kept = [row for row in csv.DictReader(f) if row.get("date") != date_iso]
+            for row in csv.DictReader(f):
+                if row.get("date") == date_iso:
+                    continue
+                # Migrate legacy rows (no `route` column) → the original route.
+                row.setdefault("route", "diest-halle")
+                row.setdefault("from", "Diest")
+                row.setdefault("to", "Halle")
+                kept.append(row)
+
     with hist.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=CSV_COLS, extrasaction="ignore")
         w.writeheader()
         for row in kept:
             w.writerow(row)
-        for t in trips:
-            w.writerow({
-                "date": date_iso, "dep_time": t["dep_time"], "train": t["train"],
-                "platform": t["platform"], "dep_delay_min": t["dep_delay_min"],
-                "arr_delay_min": t["arr_delay_min"], "arr_delay_sec": t["arr_delay_sec"],
-                "canceled": int(t["canceled"]),
-            })
+        for r in per_route:
+            for t in r["trips"]:
+                w.writerow({
+                    "date": date_iso, "route": r["route"],
+                    "from": r["from"], "to": r["to"],
+                    "dep_time": t["dep_time"], "train": t["train"],
+                    "platform": t["platform"], "dep_delay_min": t["dep_delay_min"],
+                    "arr_delay_min": t["arr_delay_min"], "arr_delay_sec": t["arr_delay_sec"],
+                    "canceled": int(t["canceled"]),
+                })
 
 
 def main() -> int:
     now = datetime.now(BXL)
     date_iso = now.strftime("%Y-%m-%d")
-    trips = collect_direct_trips(now)
-    summary = summarize(trips)
-    write_outputs(date_iso, trips, summary)
 
-    print(f"[{date_iso}] {FROM} -> {TO} direct: {summary['total_trips']} trips, "
-          f"{summary['on_time_pct']}% on time, "
-          f"avg arr delay {summary['avg_arr_delay_min']} min, "
-          f"max {summary['max_arr_delay_min']} min "
-          f"(cancelled: {summary['cancelled']})")
+    per_route = []
+    for r in ROUTES:
+        trips = collect_direct_trips(r["from"], r["to"], now)
+        summary = summarize(trips)
+        per_route.append({"route": r["slug"], "from": r["from"], "to": r["to"],
+                          "trips": trips, "summary": summary})
+        print(f"[{date_iso}] {r['from']} -> {r['to']} direct: "
+              f"{summary['total_trips']} trips, "
+              f"{summary['on_time_pct']}% on time, "
+              f"avg arr delay {summary['avg_arr_delay_min']} min, "
+              f"max {summary['max_arr_delay_min']} min "
+              f"(cancelled: {summary['cancelled']})")
+
+    write_outputs(date_iso, per_route)
     return 0
 
 

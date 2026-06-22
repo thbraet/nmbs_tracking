@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NMBS Live — Diest &amp; Halle</title>
+<title>NMBS Live — Diest connections</title>
 <style>
   :root {
     --bg: #0b0f1a;
@@ -50,6 +50,10 @@
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4);
     border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
+
+  .routebar { max-width: 1200px; margin: 0 auto 22px; display: flex; flex-wrap: wrap; gap: 22px; align-items: center; }
+  .rb-group { display: flex; align-items: center; gap: 10px; }
+  .rb-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 600; }
 
   .grid { max-width: 1200px; margin: 0 auto; display: grid; gap: 22px;
     grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -152,7 +156,7 @@
   <header class="top">
     <div class="brand">
       <h1>🚆 Live Departures</h1>
-      <span class="sub">NMBS / SNCB — Diest &amp; Halle</span>
+      <span class="sub">NMBS / SNCB — direct connections from Diest</span>
     </div>
     <div class="controls">
       <span class="updated" id="updated">Not loaded yet</span>
@@ -162,21 +166,35 @@
     </div>
   </header>
 
+  <div class="routebar">
+    <div class="rb-group">
+      <span class="rb-lbl">Connection</span>
+      <div class="seg" id="pair-seg"></div>
+    </div>
+    <div class="rb-group">
+      <span class="rb-lbl">Direction</span>
+      <div class="seg" id="dir-seg">
+        <button data-dir="out" class="active">Diest&nbsp;→&nbsp;…</button>
+        <button data-dir="in">…&nbsp;→&nbsp;Diest</button>
+      </div>
+    </div>
+  </div>
+
   <div class="grid">
-    <section class="panel" id="panel-Diest">
-      <h2><span class="dot"></span> Diest <span class="count" id="count-Diest"></span></h2>
-      <div class="body" id="body-Diest"><div class="empty">Loading…</div></div>
+    <section class="panel" id="panel-origin">
+      <h2><span class="dot"></span> <span id="title-origin">Diest</span> <span class="count" id="count-origin"></span></h2>
+      <div class="body" id="body-origin"><div class="empty">Loading…</div></div>
     </section>
-    <section class="panel" id="panel-Halle">
-      <h2><span class="dot"></span> Halle <span class="count" id="count-Halle"></span></h2>
-      <div class="body" id="body-Halle"><div class="empty">Loading…</div></div>
+    <section class="panel" id="panel-dest">
+      <h2><span class="dot"></span> <span id="title-dest">Halle</span> <span class="count" id="count-dest"></span></h2>
+      <div class="body" id="body-dest"><div class="empty">Loading…</div></div>
     </section>
   </div>
 
   <div class="tracker">
     <section class="panel">
       <h2><span class="dot"></span> Direct tracker
-        <span class="route">Diest&nbsp;→&nbsp;Halle &middot; today</span>
+        <span class="route" id="tracker-route">Diest&nbsp;→&nbsp;Halle &middot; today</span>
         <span class="count" id="tracker-count"></span>
       </h2>
       <div class="stats" id="tracker-stats"></div>
@@ -187,7 +205,7 @@
   <div class="history">
     <section class="panel">
       <h2><span class="dot"></span> History
-        <span class="route">Diest&nbsp;→&nbsp;Halle &middot; daily trends</span>
+        <span class="route" id="history-route">Diest&nbsp;→&nbsp;Halle &middot; daily trends</span>
         <span class="count" id="history-count"></span>
       </h2>
       <div class="stats" id="history-stats"></div>
@@ -220,7 +238,28 @@
   </footer>
 
 <script>
-const STATIONS = ["Diest", "Halle"];
+// Tracked station pairs (all relative to Diest). `api` is the iRail station name;
+// `label` is the friendly display name. Slugs must match fetch_log.py.
+const PAIRS = [
+  { key: "halle",            api: "Halle",            label: "Halle" },
+  { key: "brussels-north",   api: "Brussels-North",   label: "Brussel-Noord" },
+  { key: "brussels-central", api: "Brussels-Central", label: "Brussel-Centraal" },
+];
+let curPairKey = "halle";   // selected pair
+let curDir = "out";         // "out" = Diest → pair, "in" = pair → Diest
+
+function curRoute() {
+  const p = PAIRS.find(x => x.key === curPairKey);
+  const out = curDir === "out";
+  return {
+    slug: out ? `diest-${p.key}` : `${p.key}-diest`,
+    fromApi: out ? "Diest" : p.api,
+    toApi: out ? p.api : "Diest",
+    fromLabel: out ? "Diest" : p.label,
+    toLabel: out ? p.label : "Diest",
+  };
+}
+
 const API = "https://api.irail.be/v1/liveboard";
 
 function fmtTime(unix) {
@@ -270,10 +309,11 @@ function renderDeparture(dep) {
     </div>`;
 }
 
-async function loadStation(name) {
-  const body = document.getElementById("body-" + name);
-  const count = document.getElementById("count-" + name);
-  const url = `${API}?station=${encodeURIComponent(name)}&format=json&lang=en&alerts=true`;
+async function loadStation(role, apiName, displayName) {
+  const body = document.getElementById("body-" + role);
+  const count = document.getElementById("count-" + role);
+  document.getElementById("title-" + role).textContent = displayName;
+  const url = `${API}?station=${encodeURIComponent(apiName)}&format=json&lang=en&alerts=true`;
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -285,7 +325,7 @@ async function loadStation(name) {
       : `<div class="empty">No upcoming departures right now.</div>`;
   } catch (err) {
     count.textContent = "";
-    body.innerHTML = `<div class="error">Couldn't load ${name}: ${err.message}.<br>Check your connection and try Refresh.</div>`;
+    body.innerHTML = `<div class="error">Couldn't load ${displayName}: ${err.message}.<br>Check your connection and try Refresh.</div>`;
   }
 }
 
@@ -297,6 +337,9 @@ async function loadTracker() {
   const statsEl = document.getElementById("tracker-stats");
   const bodyEl = document.getElementById("tracker-body");
   const countEl = document.getElementById("tracker-count");
+  const route = curRoute();
+  document.getElementById("tracker-route").innerHTML =
+    `${route.fromLabel}&nbsp;→&nbsp;${route.toLabel} &middot; today`;
   try {
     const now = new Date();
     const dd = pad(now.getDate()), mm = pad(now.getMonth() + 1), yy = String(now.getFullYear()).slice(2);
@@ -309,7 +352,7 @@ async function loadTracker() {
 
     for (let i = 0; i < 30; i++) {
       const timeStr = pad(cursor.getHours()) + pad(cursor.getMinutes());
-      const url = `${CONN}?from=Diest&to=Halle&date=${dateStr}&time=${timeStr}&timesel=departure&format=json&lang=en`;
+      const url = `${CONN}?from=${encodeURIComponent(route.fromApi)}&to=${encodeURIComponent(route.toApi)}&date=${dateStr}&time=${timeStr}&timesel=departure&format=json&lang=en`;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
@@ -494,10 +537,15 @@ function renderDailyTable() {
 async function loadHistory() {
   const msg = document.getElementById("history-msg");
   const countEl = document.getElementById("history-count");
+  const route = curRoute();
+  document.getElementById("history-route").innerHTML =
+    `${route.fromLabel}&nbsp;→&nbsp;${route.toLabel} &middot; daily trends`;
   try {
     const res = await fetch("log/history.csv", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const rows = parseCSV(await res.text()).filter(r => r.date);
+    // Legacy rows (logged before multi-route) have no `route` column → treat as diest-halle.
+    const rows = parseCSV(await res.text())
+      .filter(r => r.date && (r.route || "diest-halle") === route.slug);
 
     const byDate = {};
     for (const r of rows) (byDate[r.date] = byDate[r.date] || []).push(r);
@@ -541,12 +589,46 @@ document.getElementById("history-seg").addEventListener("click", e => {
   renderHistChart();
 });
 
+// ---------- Route selection ----------
+function buildPairSeg() {
+  document.getElementById("pair-seg").innerHTML = PAIRS.map(p =>
+    `<button data-key="${p.key}" class="${p.key === curPairKey ? "active" : ""}">${p.label}</button>`
+  ).join("");
+}
+
+function onRouteChange() {
+  buildPairSeg();
+  for (const x of document.querySelectorAll("#dir-seg button"))
+    x.classList.toggle("active", x.dataset.dir === curDir);
+  loadAll();
+}
+
+document.getElementById("pair-seg").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.dataset.key === curPairKey) return;
+  curPairKey = b.dataset.key;
+  onRouteChange();
+});
+
+document.getElementById("dir-seg").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.dataset.dir === curDir) return;
+  curDir = b.dataset.dir;
+  onRouteChange();
+});
+
 async function loadAll() {
   const btn = document.getElementById("refresh");
   const label = document.getElementById("btn-label");
   btn.disabled = true;
   label.innerHTML = `<span class="spin"></span> Refreshing`;
-  await Promise.all([...STATIONS.map(loadStation), loadTracker(), loadHistory()]);
+  const route = curRoute();
+  await Promise.all([
+    loadStation("origin", route.fromApi, route.fromLabel),
+    loadStation("dest", route.toApi, route.toLabel),
+    loadTracker(),
+    loadHistory(),
+  ]);
   const now = new Date();
   document.getElementById("updated").textContent =
     "Updated " + now.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -554,6 +636,7 @@ async function loadAll() {
   btn.disabled = false;
 }
 
+buildPairSeg();
 loadAll();
 </script>
 </body>
