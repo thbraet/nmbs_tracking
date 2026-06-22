@@ -20,6 +20,8 @@ import csv
 import json
 import ssl
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -29,6 +31,16 @@ from zoneinfo import ZoneInfo
 BXL = ZoneInfo("Europe/Brussels")
 CONN_URL = "https://api.irail.be/v1/connections"
 LOG_DIR = Path(__file__).resolve().parent / "log"
+
+# --- iRail API politeness ---------------------------------------------------
+# iRail asks for a descriptive User-Agent (ideally with a contact/URL) and rate-
+# limits to a few requests per second. We space requests out well under that cap
+# and back off on errors so a full multi-route run never trips the limiter.
+USER_AGENT = ("nmbs-diest-tracker/1.0 (personal daily delay log; "
+              "+https://github.com/thbraet/nmbs_tracking)")
+MIN_REQUEST_INTERVAL = 0.7   # seconds between requests (~1.4 req/s, under iRail's ~3/s)
+MAX_RETRIES = 5
+_last_request_at = 0.0       # monotonic timestamp of the previous request
 
 # Each route: stable slug, the API station names, and a friendly label.
 # Slugs are also used by the dashboard to filter history.csv, so keep them stable.
@@ -49,17 +61,52 @@ except ImportError:
     SSL_CTX = ssl.create_default_context()
 
 
+def _throttle() -> None:
+    """Block until at least MIN_REQUEST_INTERVAL has passed since the last call."""
+    global _last_request_at
+    wait = MIN_REQUEST_INTERVAL - (time.monotonic() - _last_request_at)
+    if wait > 0:
+        time.sleep(wait)
+    _last_request_at = time.monotonic()
+
+
 def fetch(frm: str, to: str, date_ddmmyy: str, time_hhmm: str) -> dict:
+    """Fetch one connections page, throttled and with retry/backoff.
+
+    Retries on rate limiting (HTTP 429, honoring Retry-After), transient 5xx,
+    network errors, and malformed JSON, with exponential backoff."""
     params = urllib.parse.urlencode({
         "from": frm, "to": to, "date": date_ddmmyy, "time": time_hhmm,
         "timesel": "departure", "format": "json", "lang": "en",
     })
-    req = urllib.request.Request(
-        f"{CONN_URL}?{params}",
-        headers={"User-Agent": "diest-tracker/1.0 (personal daily log)"},
-    )
-    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
-        return json.load(r)
+    url = f"{CONN_URL}?{params}"
+
+    last_err = None
+    for attempt in range(MAX_RETRIES):
+        _throttle()
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429:                      # rate limited
+                retry_after = (e.headers.get("Retry-After") or "").strip()
+                wait = float(retry_after) if retry_after.isdigit() else 2 ** (attempt + 1)
+                print(f"  rate limited (429), waiting {wait:g}s…", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            if 500 <= e.code < 600:                # transient server error
+                time.sleep(2 ** attempt)
+                continue
+            raise                                  # 4xx other than 429 → real error
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            last_err = e
+            time.sleep(2 ** attempt)
+            continue
+
+    raise RuntimeError(f"iRail request failed after {MAX_RETRIES} attempts "
+                       f"({frm}->{to} @ {time_hhmm}): {last_err}")
 
 
 def collect_direct_trips(frm: str, to: str, now: datetime) -> list[dict]:

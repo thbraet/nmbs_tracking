@@ -2,11 +2,17 @@ name: Daily NMBS train log
 
 on:
   schedule:
-    # 21:45 UTC = 23:45 Brussels (summer) / 22:45 Brussels (winter).
-    # Late enough to capture (almost) the whole day, but always still "today"
-    # in Brussels so iRail's same-day real-time delays are available.
+    # GitHub cron is UTC-only, but we want 23:45 *Brussels* time year-round.
+    # Brussels is UTC+2 in summer (CEST) and UTC+1 in winter (CET), so we fire at
+    # both candidate UTC times and let the gate step below keep only the trigger
+    # that actually lands on the 23:00 Brussels hour:
+    #   21:45 UTC -> 23:45 Brussels in summer (CEST)
+    #   22:45 UTC -> 23:45 Brussels in winter (CET)
+    # 23:45 is late enough to capture (almost) the whole day, but always still
+    # "today" in Brussels so iRail's same-day real-time delays are available.
     - cron: "45 21 * * *"
-  workflow_dispatch: {}   # allow manual runs from the Actions tab
+    - cron: "45 22 * * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab (always proceed)
 
 permissions:
   contents: write          # needed to commit the updated log back to the repo
@@ -19,19 +25,36 @@ jobs:
   log:
     runs-on: ubuntu-latest
     steps:
+      - name: Gate to 23:45 Brussels (DST-aware)
+        id: gate
+        run: |
+          echo "Brussels time now: $(TZ=Europe/Brussels date '+%F %H:%M %Z')"
+          # Manual runs always proceed; scheduled runs only on the 23:00 Brussels hour.
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(TZ=Europe/Brussels date +%H)" = "23" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Off-season trigger (not 23:00 in Brussels) — skipping."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.proceed == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.proceed == 'true'
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: steps.gate.outputs.proceed == 'true'
         run: pip install --quiet certifi
 
       - name: Fetch today's direct trips for all routes
+        if: steps.gate.outputs.proceed == 'true'
         run: python fetch_log.py
 
       - name: Commit updated log
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

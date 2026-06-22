@@ -5,13 +5,13 @@
       "from": "Diest",
       "to": "Halle",
       "summary": {
-        "total_trips": 11,
-        "cancelled": 0,
+        "total_trips": 12,
+        "cancelled": 1,
         "on_time": 5,
         "late": 6,
         "on_time_pct": 45,
-        "avg_arr_delay_min": 3.91,
-        "max_arr_delay_min": 28
+        "avg_arr_delay_min": 4.73,
+        "max_arr_delay_min": 37
       },
       "trips": [
         {
@@ -120,9 +120,19 @@
           "train": "IC 1737",
           "platform": "1",
           "dep_delay_min": 0,
-          "arr_delay_sec": 1680,
-          "arr_delay_min": 28,
+          "arr_delay_sec": 2220,
+          "arr_delay_min": 37,
           "canceled": false
+        },
+        {
+          "dep_unix": 1782138480,
+          "dep_time": "16:28",
+          "train": "IC 1738",
+          "platform": "1",
+          "dep_delay_min": 0,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": true
         }
       ]
     },
@@ -130,12 +140,12 @@
       "from": "Halle",
       "to": "Diest",
       "summary": {
-        "total_trips": 11,
+        "total_trips": 12,
         "cancelled": 0,
-        "on_time": 5,
+        "on_time": 6,
         "late": 6,
-        "on_time_pct": 45,
-        "avg_arr_delay_min": 3.73,
+        "on_time_pct": 50,
+        "avg_arr_delay_min": 3.42,
         "max_arr_delay_min": 12
       },
       "trips": [
@@ -248,6 +258,16 @@
           "arr_delay_sec": 0,
           "arr_delay_min": 0,
           "canceled": false
+        },
+        {
+          "dep_unix": 1782138360,
+          "dep_time": "16:26",
+          "train": "IC 1715",
+          "platform": "4",
+          "dep_delay_min": 0,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": false
         }
       ]
     },
@@ -255,13 +275,13 @@
       "from": "Diest",
       "to": "Brussels-North",
       "summary": {
-        "total_trips": 13,
-        "cancelled": 0,
+        "total_trips": 14,
+        "cancelled": 1,
         "on_time": 6,
         "late": 7,
         "on_time_pct": 46,
-        "avg_arr_delay_min": 3.85,
-        "max_arr_delay_min": 32
+        "avg_arr_delay_min": 4.23,
+        "max_arr_delay_min": 37
       },
       "trips": [
         {
@@ -390,9 +410,19 @@
           "train": "IC 1737",
           "platform": "1",
           "dep_delay_min": 0,
-          "arr_delay_sec": 1920,
-          "arr_delay_min": 32,
+          "arr_delay_sec": 2220,
+          "arr_delay_min": 37,
           "canceled": false
+        },
+        {
+          "dep_unix": 1782138480,
+          "dep_time": "16:28",
+          "train": "IC 1738",
+          "platform": "1",
+          "dep_delay_min": 0,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": true
         }
       ]
     },
@@ -400,12 +430,12 @@
       "from": "Brussels-North",
       "to": "Diest",
       "summary": {
-        "total_trips": 11,
+        "total_trips": 13,
         "cancelled": 0,
-        "on_time": 5,
-        "late": 6,
-        "on_time_pct": 45,
-        "avg_arr_delay_min": 3.73,
+        "on_time": 6,
+        "late": 7,
+        "on_time_pct": 46,
+        "avg_arr_delay_min": 3.62,
         "max_arr_delay_min": 12
       },
       "trips": [
@@ -518,6 +548,26 @@
           "arr_delay_sec": 0,
           "arr_delay_min": 0,
           "canceled": false
+        },
+        {
+          "dep_unix": 1782137520,
+          "dep_time": "16:12",
+          "train": "P 8305",
+          "platform": "2",
+          "dep_delay_min": 1,
+          "arr_delay_sec": 360,
+          "arr_delay_min": 6,
+          "canceled": false
+        },
+        {
+          "dep_unix": 1782139920,
+          "dep_time": "16:52",
+          "train": "IC 1715",
+          "platform": "6",
+          "dep_delay_min": 4,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": false
         }
       ]
     },
@@ -525,13 +575,13 @@
       "from": "Diest",
       "to": "Brussels-Central",
       "summary": {
-        "total_trips": 13,
-        "cancelled": 0,
+        "total_trips": 14,
+        "cancelled": 1,
         "on_time": 5,
         "late": 8,
         "on_time_pct": 38,
-        "avg_arr_delay_min": 5.08,
-        "max_arr_delay_min": 32
+        "avg_arr_delay_min": 5.54,
+        "max_arr_delay_min": 38
       },
       "trips": [
         {
@@ -660,9 +710,19 @@
           "train": "IC 1737",
           "platform": "1",
           "dep_delay_min": 0,
-          "arr_delay_sec": 1920,
-          "arr_delay_min": 32,
+          "arr_delay_sec": 2280,
+          "arr_delay_min": 38,
           "canceled": false
+        },
+        {
+          "dep_unix": 1782138480,
+          "dep_time": "16:28",
+          "train": "IC 1738",
+          "platform": "1",
+          "dep_delay_min": 0,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": true
         }
       ]
     },
@@ -670,12 +730,12 @@
       "from": "Brussels-Central",
       "to": "Diest",
       "summary": {
-        "total_trips": 11,
+        "total_trips": 13,
         "cancelled": 0,
-        "on_time": 5,
-        "late": 6,
-        "on_time_pct": 45,
-        "avg_arr_delay_min": 3.73,
+        "on_time": 6,
+        "late": 7,
+        "on_time_pct": 46,
+        "avg_arr_delay_min": 3.62,
         "max_arr_delay_min": 12
       },
       "trips": [
@@ -785,6 +845,26 @@
           "train": "IC 1714",
           "platform": "3",
           "dep_delay_min": 1,
+          "arr_delay_sec": 0,
+          "arr_delay_min": 0,
+          "canceled": false
+        },
+        {
+          "dep_unix": 1782136920,
+          "dep_time": "16:02",
+          "train": "P 8305",
+          "platform": "3",
+          "dep_delay_min": 5,
+          "arr_delay_sec": 360,
+          "arr_delay_min": 6,
+          "canceled": false
+        },
+        {
+          "dep_unix": 1782139500,
+          "dep_time": "16:45",
+          "train": "IC 1715",
+          "platform": "3",
+          "dep_delay_min": 5,
           "arr_delay_sec": 0,
           "arr_delay_min": 0,
           "canceled": false
