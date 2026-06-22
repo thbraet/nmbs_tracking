@@ -113,6 +113,37 @@
   table.trips tr.canc td.s { text-decoration: none; }
   .ic { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 12px; font-weight: 700;
     background: rgba(77,155,255,.16); color: var(--accent); }
+
+  /* ---- Multi-day history (reads log/history.csv) ---- */
+  .history { max-width: 1200px; margin: 22px auto 0; }
+  .history .toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 12.5px; font-weight: 600; padding: 7px 13px; transition: background .12s, color .12s; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: rgba(77,155,255,.18); color: var(--accent); }
+  .chart-wrap { padding: 18px; overflow-x: auto; }
+  .chart { display: flex; align-items: flex-end; gap: 10px; height: 200px; min-width: min-content; }
+  .bar-col { display: flex; flex-direction: column; align-items: center; gap: 6px; justify-content: flex-end;
+    min-width: 34px; flex: 1; height: 100%; }
+  .bar-col .v { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .bar { width: 26px; border-radius: 6px 6px 0 0; min-height: 3px; transition: height .25s ease; background: var(--accent); }
+  .bar.good { background: linear-gradient(180deg, #45e0ad, #2bb98a); }
+  .bar.warn { background: linear-gradient(180deg, #ffcb52, #f0a813); }
+  .bar.bad  { background: linear-gradient(180deg, #ff7b7b, #e84444); }
+  .bar-col .lbl { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .hist-twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+  @media (max-width: 760px) { .hist-twocol { grid-template-columns: 1fr; } }
+  .hist-twocol > div { background: var(--panel-2); min-width: 0; }
+  .subhead { padding: 13px 18px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+    border-bottom: 1px solid rgba(255,255,255,.05); font-weight: 600; }
+  .barlist { padding: 10px 18px 16px; }
+  .barlist .item { display: grid; grid-template-columns: 52px 1fr auto; gap: 11px; align-items: center; padding: 5px 0; }
+  .barlist .item .t { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; }
+  .barlist .track { background: rgba(255,255,255,.06); border-radius: 5px; height: 9px; overflow: hidden; }
+  .barlist .fill { height: 100%; border-radius: 5px; transition: width .25s ease; }
+  .barlist .item .n { text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   footer { max-width: 1200px; margin: 26px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
   footer a { color: var(--accent); text-decoration: none; }
 </style>
@@ -150,6 +181,36 @@
       </h2>
       <div class="stats" id="tracker-stats"></div>
       <div id="tracker-body"><div class="empty">Loading…</div></div>
+    </section>
+  </div>
+
+  <div class="history">
+    <section class="panel">
+      <h2><span class="dot"></span> History
+        <span class="route">Diest&nbsp;→&nbsp;Halle &middot; daily trends</span>
+        <span class="count" id="history-count"></span>
+      </h2>
+      <div class="stats" id="history-stats"></div>
+      <div class="toolbar">
+        <div class="seg" id="history-seg">
+          <button data-metric="avg" class="active">Avg delay</button>
+          <button data-metric="ontime">On-time %</button>
+          <button data-metric="max">Worst delay</button>
+          <button data-metric="cancel">Cancelled</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><div class="chart" id="history-chart"></div></div>
+      <div class="hist-twocol">
+        <div>
+          <div class="subhead">Most delay-prone departures</div>
+          <div class="barlist" id="history-bytime"></div>
+        </div>
+        <div>
+          <div class="subhead">Per-day breakdown</div>
+          <div id="history-daily" style="overflow-x:auto"></div>
+        </div>
+      </div>
+      <div id="history-msg"></div>
     </section>
   </div>
 
@@ -321,12 +382,171 @@ async function loadTracker() {
   }
 }
 
+// ---------- Multi-day history (reads log/history.csv) ----------
+let HIST_DAILY = [];          // one entry per logged day, oldest first
+let histMetric = "avg";       // avg | ontime | max | cancel
+
+function parseCSV(text) {
+  const lines = text.replace(/^﻿/, "").trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const cells = line.split(",");
+    const o = {};
+    headers.forEach((h, i) => o[h] = (cells[i] ?? "").trim());
+    return o;
+  });
+}
+
+function fmtDay(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("nl-BE", { weekday: "short", day: "2-digit", month: "short" });
+}
+
+function classFor(metric, v) {
+  if (metric === "avg" || metric === "max") return v < 1 ? "good" : v < 3 ? "warn" : "bad";
+  if (metric === "ontime") return v >= 80 ? "good" : v >= 50 ? "warn" : "bad";
+  if (metric === "cancel") return v === 0 ? "good" : v < 2 ? "warn" : "bad";
+  return "";
+}
+
+function renderHistStats() {
+  const el = document.getElementById("history-stats");
+  const allArr = HIST_DAILY.flatMap(d => d._arr);
+  const onTime = allArr.filter(m => m <= 0).length;
+  const pct = allArr.length ? Math.round(100 * onTime / allArr.length) : 0;
+  const avg = allArr.length ? allArr.reduce((a, b) => a + b, 0) / allArr.length : 0;
+  const worst = HIST_DAILY.reduce((w, d) => (!w || d.avgArr > w.avgArr ? d : w), null);
+  el.innerHTML = `
+    <div class="stat"><div class="k">Days logged</div><div class="v">${HIST_DAILY.length}</div></div>
+    <div class="stat"><div class="k">Overall on-time</div>
+      <div class="v ${pct >= 80 ? "good" : pct >= 50 ? "warn" : "bad"}">${pct}%</div></div>
+    <div class="stat"><div class="k">Avg arr. delay</div>
+      <div class="v ${avg < 1 ? "good" : avg < 3 ? "warn" : "bad"}">${avg.toFixed(1)}m</div></div>
+    <div class="stat"><div class="k">Worst day</div>
+      <div class="v ${worst ? classFor("avg", worst.avgArr) : ""}">${worst ? (worst.avgArr > 0 ? "+" : "") + worst.avgArr.toFixed(1) + "m" : "–"}</div></div>`;
+}
+
+function renderHistChart() {
+  const el = document.getElementById("history-chart");
+  if (!HIST_DAILY.length) { el.innerHTML = ""; return; }
+  const meta = {
+    avg:    { key: "avgArr",    scale: null, fmt: v => (v > 0 ? "+" : "") + v.toFixed(1) },
+    ontime: { key: "onTimePct", scale: 100,  fmt: v => v + "%" },
+    max:    { key: "maxArr",    scale: null, fmt: v => (v > 0 ? "+" : "") + v },
+    cancel: { key: "cancelled", scale: null, fmt: v => String(v) },
+  }[histMetric];
+  const vals = HIST_DAILY.map(d => Number(d[meta.key]) || 0);
+  const top = meta.scale ?? Math.max(1, ...vals.map(Math.abs));
+  el.innerHTML = HIST_DAILY.map((d, i) => {
+    const v = vals[i];
+    const h = Math.max(3, Math.round(100 * Math.abs(v) / top));
+    return `<div class="bar-col" title="${d.date}">
+      <span class="v">${meta.fmt(v)}</span>
+      <div class="bar ${classFor(histMetric, v)}" style="height:${h}%"></div>
+      <span class="lbl">${fmtDay(d.date)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderByTime(rows) {
+  const el = document.getElementById("history-bytime");
+  const byT = {};
+  for (const r of rows) {
+    if (r.canceled === "1" || !r.dep_time) continue;
+    (byT[r.dep_time] = byT[r.dep_time] || []).push(Number(r.arr_delay_min) || 0);
+  }
+  const items = Object.entries(byT)
+    .map(([t, arr]) => ({ t, n: arr.length, avg: arr.reduce((a, b) => a + b, 0) / arr.length }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 8);
+  if (!items.length) { el.innerHTML = `<div class="empty">No data yet.</div>`; return; }
+  const top = Math.max(1, ...items.map(x => Math.abs(x.avg)));
+  el.innerHTML = items.map(x => {
+    const cls = classFor("avg", x.avg);
+    const color = cls === "good" ? "var(--green)" : cls === "warn" ? "var(--amber)" : "var(--red)";
+    const w = Math.max(4, Math.round(100 * Math.abs(x.avg) / top));
+    return `<div class="item">
+      <span class="t">${x.t}</span>
+      <div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div>
+      <span class="n">${(x.avg > 0 ? "+" : "") + x.avg.toFixed(1)}m · ${x.n}d</span>
+    </div>`;
+  }).join("");
+}
+
+function renderDailyTable() {
+  const el = document.getElementById("history-daily");
+  el.innerHTML = `<table class="trips">
+    <thead><tr><th>Day</th><th>Trips</th><th>Canc.</th><th>On-time</th><th>Avg</th><th>Max</th></tr></thead>
+    <tbody>${HIST_DAILY.slice().reverse().map(d => {
+      const cls = d.avgArr >= 5 ? "vlate" : d.avgArr > 0 ? "late" : "";
+      return `<tr class="${cls}">
+        <td>${fmtDay(d.date)}</td>
+        <td>${d.total}</td>
+        <td>${d.cancelled || 0}</td>
+        <td>${d.onTimePct == null ? "–" : d.onTimePct + "%"}</td>
+        <td class="d">${d._arr.length ? (d.avgArr > 0 ? "+" : "") + d.avgArr.toFixed(1) + "m" : "–"}</td>
+        <td class="d">${d._arr.length ? (d.maxArr > 0 ? "+" : "") + d.maxArr + "m" : "–"}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+async function loadHistory() {
+  const msg = document.getElementById("history-msg");
+  const countEl = document.getElementById("history-count");
+  try {
+    const res = await fetch("log/history.csv", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const rows = parseCSV(await res.text()).filter(r => r.date);
+
+    const byDate = {};
+    for (const r of rows) (byDate[r.date] = byDate[r.date] || []).push(r);
+    HIST_DAILY = Object.entries(byDate).map(([date, rs]) => {
+      const ran = rs.filter(r => r.canceled !== "1");
+      const arr = ran.map(r => Number(r.arr_delay_min) || 0);
+      const onTime = arr.filter(m => m <= 0).length;
+      return {
+        date, total: rs.length, cancelled: rs.length - ran.length,
+        onTimePct: arr.length ? Math.round(100 * onTime / arr.length) : null,
+        avgArr: arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0,
+        maxArr: arr.length ? Math.max(...arr) : 0,
+        _arr: arr,
+      };
+    }).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    if (!HIST_DAILY.length) {
+      countEl.textContent = "";
+      msg.innerHTML = `<div class="empty">No history logged yet — check back after the first daily run.</div>`;
+      return;
+    }
+    countEl.textContent = `${HIST_DAILY.length} day${HIST_DAILY.length === 1 ? "" : "s"}`;
+    msg.innerHTML = "";
+    renderHistStats();
+    renderHistChart();
+    renderByTime(rows);
+    renderDailyTable();
+  } catch (err) {
+    countEl.textContent = "";
+    document.getElementById("history-stats").innerHTML = "";
+    document.getElementById("history-chart").innerHTML = "";
+    msg.innerHTML = `<div class="error">Couldn't load history: ${err.message}.<br>This view needs the page served over http(s) with <code>log/history.csv</code> alongside it.</div>`;
+  }
+}
+
+document.getElementById("history-seg").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  histMetric = b.dataset.metric;
+  for (const x of e.currentTarget.querySelectorAll("button")) x.classList.toggle("active", x === b);
+  renderHistChart();
+});
+
 async function loadAll() {
   const btn = document.getElementById("refresh");
   const label = document.getElementById("btn-label");
   btn.disabled = true;
   label.innerHTML = `<span class="spin"></span> Refreshing`;
-  await Promise.all([...STATIONS.map(loadStation), loadTracker()]);
+  await Promise.all([...STATIONS.map(loadStation), loadTracker(), loadHistory()]);
   const now = new Date();
   document.getElementById("updated").textContent =
     "Updated " + now.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
