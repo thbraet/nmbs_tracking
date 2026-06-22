@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMBS Live Board — Diest · Halle · Brussels</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #121a2b;
+    --panel-2: #0e1626;
+    --line: #1f2c45;
+    --text: #e8eefc;
+    --muted: #8294b8;
+    --amber: #ffb400;
+    --green: #38d39f;
+    --red: #ff5d5d;
+    --accent: #4d9bff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, #14213b 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    padding: 24px clamp(12px, 3vw, 40px) 48px;
+  }
+  header.top {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 16px;
+    max-width: 1280px; margin: 0 auto 22px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .brand h1 { font-size: clamp(20px, 3vw, 28px); margin: 0; letter-spacing: .3px; }
+  .brand .sub { color: var(--muted); font-size: 13px; }
+  .controls { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .updated { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  /* Arrivals / Departures toggle */
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 14px; font-weight: 700; padding: 10px 18px; transition: background .12s, color .12s;
+    display: inline-flex; align-items: center; gap: 7px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: rgba(77,155,255,.18); color: var(--accent); }
+
+  button.refresh {
+    appearance: none; border: 1px solid var(--accent); cursor: pointer;
+    background: linear-gradient(180deg, #2f6fd6, #1f57b8);
+    color: #fff; font-size: 14px; font-weight: 600;
+    padding: 10px 18px; border-radius: 10px; display: inline-flex; align-items: center; gap: 8px;
+    transition: transform .08s ease, filter .15s ease;
+  }
+  button.refresh:hover { filter: brightness(1.1); }
+  button.refresh:active { transform: translateY(1px); }
+  button.refresh[disabled] { opacity: .6; cursor: progress; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  .grid { max-width: 1280px; margin: 0 auto; display: grid; gap: 22px;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+  .panel h2 { margin: 0; padding: 16px 18px; font-size: 18px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--line); background: rgba(255,255,255,.02); }
+  .panel h2 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .panel h2 .count { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 500; }
+  .panel .body { max-height: 560px; overflow-y: auto; }
+
+  .row { display: grid; grid-template-columns: 70px 1fr auto; gap: 12px; align-items: center;
+    padding: 11px 18px; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .row:last-child { border-bottom: none; }
+  .row.canceled .name { text-decoration: line-through; color: var(--muted); }
+  .row.passed { opacity: .5; }
+
+  .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
+  .time .delay { display: block; font-size: 12px; font-weight: 600; }
+  .delay.ontime { color: var(--green); }
+  .delay.late { color: var(--amber); }
+  .delay.cancel { color: var(--red); }
+
+  .dest { min-width: 0; }
+  .dest .name { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dest .lead { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .dest .meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .veh { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 700;
+    background: rgba(77,155,255,.16); color: var(--accent); }
+  .badge-cancel { color: var(--red); font-weight: 700; }
+  .badge-extra { color: var(--green); font-weight: 600; }
+  .occ { font-size: 11px; }
+
+  .plat { text-align: center; min-width: 54px; }
+  .plat .lbl { display: block; font-size: 10px; color: var(--muted); letter-spacing: .5px; }
+  .plat .val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .plat.changed .val { color: var(--amber); }
+  .plat.changed .lbl { color: var(--amber); }
+
+  .empty, .error { padding: 26px 18px; color: var(--muted); font-size: 14px; }
+  .error { color: var(--red); }
+
+  footer { max-width: 1280px; margin: 26px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>🚆 Live Board</h1>
+      <span class="sub">NMBS / SNCB — Diest · Halle · Brussels-North · Brussels-Central</span>
+    </div>
+    <div class="controls">
+      <div class="seg" id="mode-toggle">
+        <button data-mode="departure" class="active">🛫 Departures</button>
+        <button data-mode="arrival">🛬 Arrivals</button>
+      </div>
+      <span class="updated" id="updated">Not loaded yet</span>
+      <button class="refresh" id="refresh" onclick="loadAll()">
+        <span id="btn-label">Refresh</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    Data: <a href="https://docs.irail.be/" target="_blank" rel="noopener">iRail open API</a> (live NMBS/SNCB data).
+    Times shown in station local time. Auto-refreshes every 60 s.
+  </footer>
+
+<script>
+const STATIONS = ["Diest", "Halle", "Brussels-North", "Brussels-Central"];
+const API = "https://api.irail.be/v1/liveboard";
+let MODE = "departure";           // "departure" | "arrival"
+let timer = null;
+
+// Build a panel per station once.
+const grid = document.getElementById("grid");
+for (const name of STATIONS) {
+  const sec = document.createElement("section");
+  sec.className = "panel";
+  sec.id = "panel-" + name;
+  sec.innerHTML = `<h2><span class="dot"></span> ${name} <span class="count" id="count-${name}"></span></h2>
+    <div class="body" id="body-${name}"><div class="empty">Loading…</div></div>`;
+  grid.appendChild(sec);
+}
+
+function fmtTime(unix) {
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+function occupancyLabel(occ) {
+  const id = (occ && occ.name) || "unknown";
+  const map = { low: "🟢 quiet", medium: "🟠 busy", high: "🔴 full", unknown: "" };
+  return map[id] || "";
+}
+
+// One renderer for both modes; `mode` decides the wording.
+function renderRow(t, mode) {
+  const delaySec = parseInt(t.delay || "0", 10);
+  const delayMin = Math.round(delaySec / 60);
+  const canceled = t.canceled === "1";
+  const isExtra = t.isExtra === "1";
+  const gone = mode === "departure" ? t.left === "1" : t.arrived === "1";
+  const platChanged = t.platforminfo && t.platforminfo.normal === "0";
+  const plat = (t.platforminfo && t.platforminfo.name) || t.platform || "–";
+  const veh = (t.vehicleinfo && t.vehicleinfo.shortname) || (t.vehicle || "").split(".").pop();
+  const lead = mode === "departure" ? "to" : "from";
+
+  const delayHtml = canceled
+    ? `<span class="delay cancel">cancelled</span>`
+    : (delayMin > 0
+        ? `<span class="delay late">+${delayMin} min</span>`
+        : `<span class="delay ontime">on time</span>`);
+
+  const occ = occupancyLabel(t.occupancy);
+  const meta = [];
+  meta.push(`<span class="veh">${veh || "?"}</span>`);
+  if (gone) meta.push(`<span>${mode === "departure" ? "departed" : "arrived"}</span>`);
+  if (isExtra) meta.push(`<span class="badge-extra">extra train</span>`);
+  if (canceled) meta.push(`<span class="badge-cancel">CANCELLED</span>`);
+  if (occ) meta.push(`<span class="occ">${occ}</span>`);
+
+  return `
+    <div class="row ${canceled ? "canceled" : ""} ${gone ? "passed" : ""}">
+      <div class="time">${fmtTime(t.time)}${delayHtml}</div>
+      <div class="dest">
+        <div class="name"><span class="lead">${lead}</span> ${t.station}</div>
+        <div class="meta">${meta.join("")}</div>
+      </div>
+      <div class="plat ${platChanged ? "changed" : ""}">
+        <span class="lbl">PLATF.</span><span class="val">${plat}</span>
+      </div>
+    </div>`;
+}
+
+async function loadStation(name) {
+  const body = document.getElementById("body-" + name);
+  const count = document.getElementById("count-" + name);
+  const url = `${API}?station=${encodeURIComponent(name)}&arrdep=${MODE}&format=json&lang=en&alerts=true`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const list = MODE === "departure"
+      ? (data.departures && data.departures.departure) || []
+      : (data.arrivals && data.arrivals.arrival) || [];
+    const word = MODE === "departure" ? "departures" : "arrivals";
+    count.textContent = list.length ? `${list.length} ${word}` : "";
+    body.innerHTML = list.length
+      ? list.map(t => renderRow(t, MODE)).join("")
+      : `<div class="empty">No upcoming ${word} right now.</div>`;
+  } catch (err) {
+    count.textContent = "";
+    body.innerHTML = `<div class="error">Couldn't load ${name}: ${err.message}.<br>Check your connection and try Refresh.</div>`;
+  }
+}
+
+async function loadAll() {
+  const btn = document.getElementById("refresh");
+  const label = document.getElementById("btn-label");
+  btn.disabled = true;
+  label.innerHTML = `<span class="spin"></span> Refreshing`;
+  await Promise.all(STATIONS.map(loadStation));
+  const now = new Date();
+  document.getElementById("updated").textContent =
+    "Updated " + now.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  label.textContent = "Refresh";
+  btn.disabled = false;
+}
+
+// Toggle wiring
+document.getElementById("mode-toggle").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.dataset.mode === MODE) return;
+  MODE = b.dataset.mode;
+  for (const btn of document.querySelectorAll("#mode-toggle button"))
+    btn.classList.toggle("active", btn.dataset.mode === MODE);
+  // clear stale rows so the switch is visibly instant
+  for (const name of STATIONS)
+    document.getElementById("body-" + name).innerHTML = `<div class="empty">Loading…</div>`;
+  loadAll();
+});
+
+function schedule() {
+  if (timer) clearInterval(timer);
+  timer = setInterval(loadAll, 60000);
+}
+
+loadAll();
+schedule();
+</script>
+</body>
+</html>
