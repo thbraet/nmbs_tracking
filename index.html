@@ -1,6 +1,69 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
-<title>NMBS Live — Diest &amp; Halle</title>
-<meta http-equiv="refresh" content="0; url=train-dashboard.html">
-<link rel="canonical" href="train-dashboard.html">
-<p style="font-family:sans-serif">Redirecting to the <a href="train-dashboard.html">Diest &amp; Halle train dashboard</a>…</p>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMBS Tracking — Diest · Halle · Brussels</title>
+<style>
+  :root {
+    --bg: #0b0f1a; --panel: #121a2b; --panel-2: #0e1626; --line: #1f2c45;
+    --text: #e8eefc; --muted: #8294b8; --accent: #4d9bff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, #14213b 0%, transparent 60%), var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px clamp(16px, 4vw, 48px) 48px; gap: 28px;
+  }
+  header { text-align: center; }
+  header h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 8px; letter-spacing: .3px; }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .cards { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%; max-width: 760px; }
+  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line); border-radius: 16px; padding: 24px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.35);
+    transition: transform .1s ease, border-color .15s ease, filter .15s ease;
+  }
+  a.card:hover { transform: translateY(-3px); border-color: var(--accent); filter: brightness(1.05); }
+  a.card .emoji { font-size: 30px; }
+  a.card h2 { margin: 12px 0 6px; font-size: 19px; }
+  a.card p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  a.card .go { display: inline-block; margin-top: 14px; color: var(--accent); font-weight: 600; font-size: 13.5px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🚆 NMBS Tracking</h1>
+    <p>Live NMBS / SNCB train data via the iRail open API</p>
+  </header>
+
+  <div class="cards">
+    <a class="card" href="live-board.html">
+      <div class="emoji">🛫🛬</div>
+      <h2>4-station live board</h2>
+      <p>Live departures &amp; arrivals for Diest, Halle, Brussels-North and Brussels-Central, with a toggle between the two boards.</p>
+      <span class="go">Open board →</span>
+    </a>
+    <a class="card" href="train-dashboard.html">
+      <div class="emoji">📊</div>
+      <h2>Diest → Halle tracker</h2>
+      <p>Diest &amp; Halle liveboards, the direct-train tracker for today, plus multi-day delay history and trends.</p>
+      <span class="go">Open dashboard →</span>
+    </a>
+  </div>
+
+  <footer>
+    Data: <a href="https://docs.irail.be/" target="_blank" rel="noopener">iRail open API</a> ·
+    <a href="https://github.com/thbraet/nmbs_tracking" target="_blank" rel="noopener">source on GitHub</a>
+  </footer>
+</body>
+</html>
