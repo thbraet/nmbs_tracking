@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMBS — Diest ⇄ Halle stop-by-stop</title>
+<style>
+  :root {
+    --bg: #0b0f1a; --panel: #121a2b; --panel-2: #0e1626; --line: #1f2c45;
+    --text: #e8eefc; --muted: #8294b8; --accent: #4d9bff;
+    --green: #38d39f; --amber: #ffb400; --red: #ff5d5d;
+    /* delay buckets */
+    --d0: #1c6b54; --d1: #5a8f3c; --d2: #b88a16; --d3: #cf6b1f; --d4: #c23b3b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, #14213b 0%, transparent 60%), var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh; padding: 24px clamp(12px, 3vw, 40px) 48px;
+  }
+  a.back { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header.top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px;
+    max-width: 1200px; margin: 8px auto 18px; }
+  header.top h1 { font-size: clamp(20px, 3vw, 28px); margin: 0; letter-spacing: .3px; }
+  header.top .sub { color: var(--muted); font-size: 13px; }
+
+  .controls { max-width: 1200px; margin: 0 auto 20px; display: flex; flex-wrap: wrap; gap: 22px; align-items: center; }
+  .ctl { display: flex; align-items: center; gap: 10px; }
+  .ctl-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 600; }
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 12.5px; font-weight: 600; padding: 8px 14px; transition: background .12s, color .12s; white-space: nowrap; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: rgba(77,155,255,.18); color: var(--accent); }
+  select#day { appearance: none; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .updated { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+  .panel { max-width: 1200px; margin: 0 auto 22px; background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+  .panel h2 { margin: 0; padding: 15px 18px; font-size: 17px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--line); background: rgba(255,255,255,.02); }
+  .panel h2 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .panel h2 .note { margin-left: auto; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+  .panel h2 .note.live { color: var(--amber); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); }
+  @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel-2); padding: 14px 18px; }
+  .stat .k { font-size: 11px; color: var(--muted); letter-spacing: .4px; text-transform: uppercase; }
+  .stat .v { font-size: 23px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .stat .v.good { color: var(--green); } .stat .v.warn { color: var(--amber); } .stat .v.bad { color: var(--red); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 9px 14px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.04); white-space: nowrap; }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+  td { font-variant-numeric: tabular-nums; }
+  td.stopname { font-weight: 600; }
+  td.sched { color: var(--muted); font-size: 12px; }
+  .scroll { overflow-x: auto; }
+
+  /* delay-coloured pill / cell */
+  .pill { display: inline-block; min-width: 38px; text-align: center; padding: 2px 8px; border-radius: 6px;
+    font-weight: 700; font-size: 12.5px; color: #fff; }
+  .pct { font-weight: 700; }
+  .d0 { background: var(--d0); } .d1 { background: var(--d1); } .d2 { background: var(--d2); }
+  .d3 { background: var(--d3); } .d4 { background: var(--d4); }
+  .dx { background: #3a2350; color: #d9a7ff; } /* cancelled */
+  .pct.d0 { color: var(--green); background: none; } .pct.d2 { color: var(--amber); background: none; }
+  .pct.d4 { color: var(--red); background: none; }
+
+  /* matrix */
+  table.matrix th, table.matrix td { text-align: center; padding: 7px 6px; }
+  table.matrix th.train, table.matrix td.train { text-align: left; position: sticky; left: 0;
+    background: var(--panel-2); z-index: 1; }
+  table.matrix td .cell { display: block; min-width: 40px; padding: 3px 4px; border-radius: 5px; font-weight: 700; font-size: 12px; color: #fff; }
+  .ic { display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 700;
+    background: rgba(77,155,255,.16); color: var(--accent); }
+  .dep { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+  /* heatmap */
+  table.heat th, table.heat td { text-align: center; padding: 6px 7px; }
+  table.heat th.stop, table.heat td.stop { text-align: left; position: sticky; left: 0; background: var(--panel-2); z-index: 1; font-weight: 600; }
+  table.heat td .cell { display: block; min-width: 34px; padding: 4px 3px; border-radius: 5px; font-weight: 700; font-size: 11.5px; color: #fff; }
+  table.heat th.today { color: var(--amber); }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12px; align-items: center; }
+  .legend .sw { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .box { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+
+  .empty, .error, .loading { padding: 24px 18px; color: var(--muted); font-size: 14px; }
+  .error { color: var(--red); }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  footer { max-width: 1200px; margin: 26px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← all dashboards</a>
+  <header class="top">
+    <h1>🛤️ Diest ⇄ Halle — stop by stop</h1>
+    <span class="sub">Per-stop arrival &amp; departure delay along the direct IC trajectory</span>
+  </header>
+
+  <div class="controls">
+    <div class="ctl">
+      <span class="ctl-lbl">Direction</span>
+      <div class="seg" id="dir-seg">
+        <button data-dir="diest-halle" class="active">Diest&nbsp;→&nbsp;Halle</button>
+        <button data-dir="halle-diest">Halle&nbsp;→&nbsp;Diest</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="ctl-lbl">Delay shown</span>
+      <div class="seg" id="metric-seg">
+        <button data-metric="arr" class="active">Arrival</button>
+        <button data-metric="dep">Departure</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="ctl-lbl">Day</span>
+      <select id="day"></select>
+    </div>
+    <span class="updated" id="updated"></span>
+  </div>
+
+  <!-- Day summary -->
+  <section class="panel">
+    <h2><span class="dot"></span> Day summary <span class="note" id="sum-note"></span></h2>
+    <div class="stats" id="day-stats"></div>
+  </section>
+
+  <!-- Per-stop summary -->
+  <section class="panel">
+    <h2><span class="dot"></span> Per-stop delays <span class="note" id="stop-note"></span></h2>
+    <div class="scroll" id="stop-table"><div class="loading">Loading…</div></div>
+  </section>
+
+  <!-- Train × stop matrix -->
+  <section class="panel">
+    <h2><span class="dot"></span> Delay propagation — every train, every stop <span class="note" id="mx-note"></span></h2>
+    <div class="scroll" id="matrix"><div class="loading">Loading…</div></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <!-- Cross-day heatmap -->
+  <section class="panel">
+    <h2><span class="dot"></span> Multi-day heatmap <span class="note" id="heat-note">avg delay per stop, by day</span></h2>
+    <div class="scroll" id="heatmap"><div class="loading">Loading…</div></div>
+  </section>
+
+  <footer>
+    Data: <a href="https://docs.irail.be/" target="_blank" rel="noopener">iRail open API</a>.
+    Today is computed live in your browser; past days come from <code>log/stops_history.csv</code>.
+    Delays in minutes, Brussels local time.
+  </footer>
+
+<script>
+// ---------- constants ----------
+const STOP_META = {
+  "Diest":                        { full: "Diest",            short: "Diest" },
+  "Aarschot":                     { full: "Aarschot",         short: "Aarschot" },
+  "Brussels-North":               { full: "Brussel-Noord",    short: "Bxl-Noord" },
+  "Brussels-Central":             { full: "Brussel-Centraal", short: "Bxl-Centr." },
+  "Brussels-South/Brussels-Midi": { full: "Brussel-Zuid",     short: "Bxl-Zuid" },
+  "Halle":                        { full: "Halle",            short: "Halle" },
+};
+const STOP_ORDER = {
+  "diest-halle": ["Diest", "Aarschot", "Brussels-North", "Brussels-Central", "Brussels-South/Brussels-Midi", "Halle"],
+  "halle-diest": ["Halle", "Brussels-South/Brussels-Midi", "Brussels-Central", "Brussels-North", "Aarschot", "Diest"],
+};
+const DIR_LABEL = { "diest-halle": "Diest → Halle", "halle-diest": "Halle → Diest" };
+const CONN = "https://api.irail.be/v1/connections";
+const VEH = "https://api.irail.be/v1/vehicle/";
+const pad = n => String(n).padStart(2, "0");
+
+// ---------- state ----------
+let curDir = "diest-halle";
+let curMetric = "arr";          // arr | dep
+let curDay = "live";            // "live" or an ISO date
+let ROWS = [];                  // flat per-stop rows from CSV (all dates, both dirs)
+let LIVE = { "diest-halle": null, "halle-diest": null };  // live rows per direction (null=not loaded)
+let todayISO = null;
+
+// ---------- helpers ----------
+function isoToday() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function fmtDay(iso) { return new Date(iso + "T00:00:00").toLocaleDateString("nl-BE", { weekday: "short", day: "2-digit", month: "short" }); }
+function hhmm(ts) { ts = parseInt(ts || "0", 10); return ts > 0 ? new Date(ts * 1000).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", hour12: false }) : ""; }
+function delayClass(m) { if (m == null) return ""; if (m <= 0) return "d0"; if (m <= 2) return "d1"; if (m <= 4) return "d2"; if (m <= 9) return "d3"; return "d4"; }
+function fmtDelay(m) { if (m == null) return "–"; return (m > 0 ? "+" : "") + m; }
+function fmtAvg(m) { if (m == null) return "–"; return (m > 0 ? "+" : "") + m.toFixed(1); }
+const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+
+// metric accessor for a row
+const val = r => curMetric === "arr" ? r.arr : r.dep;
+
+// ---------- CSV ----------
+function parseCSV(text) {
+  const lines = text.replace(/^﻿/, "").trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const cells = line.split(",");
+    const o = {}; headers.forEach((h, i) => o[h] = (cells[i] ?? "").trim());
+    return o;
+  });
+}
+function toRow(o) {
+  return {
+    date: o.date, direction: o.direction, train: o.train, dep_time: o.dep_time,
+    seq: parseInt(o.seq, 10), stop: o.stop, sched_arr: o.sched_arr, sched_dep: o.sched_dep,
+    arr: Number(o.arr_delay_min) || 0, dep: Number(o.dep_delay_min) || 0,
+    canceled: o.canceled === "1" || o.canceled === "true",
+  };
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch("log/stops_history.csv", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    ROWS = parseCSV(await res.text()).filter(o => o.date && o.direction && o.stop).map(toRow);
+  } catch (err) {
+    ROWS = [];
+    document.getElementById("heat-note").innerHTML =
+      `<span style="color:var(--red)">history unavailable (${err.message})</span>`;
+  }
+}
+
+// ---------- live today ----------
+function extractSegment(stops, train, depTime) {
+  let iD = -1, iH = -1;
+  stops.forEach((s, i) => { if (s.station === "Diest") iD = i; if (s.station === "Halle") iH = i; });
+  if (iD < 0 || iH < 0) return [];
+  const [lo, hi] = iD < iH ? [iD, iH] : [iH, iD];
+  const direction = iD < iH ? "diest-halle" : "halle-diest";
+  return stops.slice(lo, hi + 1).map((s, seq) => ({
+    date: todayISO, direction, train, dep_time: depTime, seq, stop: s.station,
+    sched_arr: hhmm(s.scheduledArrivalTime), sched_dep: hhmm(s.scheduledDepartureTime),
+    arr: Math.round(parseInt(s.arrivalDelay || "0", 10) / 60),
+    dep: Math.round(parseInt(s.departureDelay || "0", 10) / 60),
+    canceled: s.canceled === "1" || s.arrivalCanceled === "1" || s.departureCanceled === "1",
+  }));
+}
+
+async function enumerateTrains(fromApi, toApi) {
+  const now = new Date();
+  const dateStr = pad(now.getDate()) + pad(now.getMonth() + 1) + String(now.getFullYear()).slice(2);
+  const nowSec = Math.floor(now.getTime() / 1000);
+  const trains = new Map();                 // veh -> {veh, depT}
+  let cursor = new Date(now); cursor.setHours(0, 0, 0, 0);
+  let lastDep = 0;
+  for (let i = 0; i < 30; i++) {
+    const timeStr = pad(cursor.getHours()) + pad(cursor.getMinutes());
+    const url = `${CONN}?from=${encodeURIComponent(fromApi)}&to=${encodeURIComponent(toApi)}&date=${dateStr}&time=${timeStr}&timesel=departure&format=json&lang=en`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const conns = ((await res.json()).connection) || [];
+    if (!conns.length) break;
+    for (const c of conns) {
+      if (parseInt((c.vias && c.vias.number) || "0", 10) !== 0) continue;  // direct only
+      const depT = parseInt(c.departure.time, 10);
+      if (depT > nowSec) continue;                                          // already departed
+      const veh = (c.departure.vehicleinfo && c.departure.vehicleinfo.shortname) || (c.departure.vehicle || "").split(".").pop();
+      if (veh) trains.set(veh, { veh, depT });
+    }
+    let maxDep = Math.max(...conns.map(c => parseInt(c.departure.time, 10)));
+    if (maxDep <= lastDep) maxDep = lastDep + 3600;
+    lastDep = maxDep;
+    if (lastDep > nowSec + 1800) break;
+    cursor = new Date((lastDep + 60) * 1000);
+  }
+  return [...trains.values()].sort((a, b) => a.depT - b.depT);
+}
+
+// run async tasks with a small concurrency cap (iRail politeness)
+async function pool(items, n, fn) {
+  const out = []; let i = 0;
+  async function worker() { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
+async function loadLive(dir) {
+  if (LIVE[dir]) return LIVE[dir];
+  const order = STOP_ORDER[dir];
+  const fromApi = order[0], toApi = order[order.length - 1];
+  const dateStr = (() => { const d = new Date(); return pad(d.getDate()) + pad(d.getMonth() + 1) + String(d.getFullYear()).slice(2); })();
+  const trains = await enumerateTrains(fromApi, toApi);
+  const perTrain = await pool(trains, 3, async ({ veh, depT }) => {
+    try {
+      const res = await fetch(`${VEH}?id=${encodeURIComponent(veh.replace(/\s/g, ""))}&date=${dateStr}&format=json&lang=en`, { cache: "no-store" });
+      if (!res.ok) return [];
+      const stops = (((await res.json()).stops) || {}).stop || [];
+      const depLabel = new Date(depT * 1000).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", hour12: false });
+      return extractSegment(stops, veh, depLabel).filter(r => r.direction === dir);
+    } catch { return []; }
+  });
+  LIVE[dir] = perTrain.flat();
+  return LIVE[dir];
+}
+
+// ---------- data selection ----------
+// rows for the currently selected direction + day
+function currentRows() {
+  if (curDay === "live") return (LIVE[curDir] || []);
+  return ROWS.filter(r => r.direction === curDir && r.date === curDay);
+}
+// group rows of one day into runs (trains), each {train, dep_time, byStop:{stop->row}}
+function groupRuns(rows) {
+  const runs = new Map();
+  for (const r of rows) {
+    const key = r.train + "|" + r.dep_time;
+    if (!runs.has(key)) runs.set(key, { train: r.train, dep_time: r.dep_time, byStop: {} });
+    runs.get(key).byStop[r.stop] = r;
+  }
+  return [...runs.values()].sort((a, b) => (a.dep_time < b.dep_time ? -1 : a.dep_time > b.dep_time ? 1 : 0));
+}
+// available logged dates for current direction (newest first), excluding today (live covers it)
+function loggedDates() {
+  const set = new Set(ROWS.filter(r => r.direction === curDir && r.date !== todayISO).map(r => r.date));
+  return [...set].sort().reverse();
+}
+
+// ---------- renderers ----------
+function renderDaySelect() {
+  const sel = document.getElementById("day");
+  const dates = loggedDates();
+  const opts = [`<option value="live">Today (live)</option>`]
+    .concat(dates.map(d => `<option value="${d}">${fmtDay(d)} — ${d}</option>`));
+  sel.innerHTML = opts.join("");
+  if (curDay !== "live" && !dates.includes(curDay)) curDay = "live";
+  sel.value = curDay;
+}
+
+function renderDayStats(runs) {
+  const note = document.getElementById("sum-note");
+  note.textContent = `${DIR_LABEL[curDir]} · ${curDay === "live" ? "today (live)" : fmtDay(curDay)}`;
+  note.className = "note" + (curDay === "live" ? " live" : "");
+  const el = document.getElementById("day-stats");
+  if (!runs.length) { el.innerHTML = `<div class="stat"><div class="k">Trains</div><div class="v">0</div></div>`; return; }
+  const order = STOP_ORDER[curDir];
+  const destName = order[order.length - 1];
+  const ran = runs.filter(r => { const d = r.byStop[destName]; return d && !d.canceled; });
+  const destArr = ran.map(r => r.byStop[destName].arr);
+  const onTime = destArr.filter(m => m <= 0).length;
+  const pct = destArr.length ? Math.round(100 * onTime / destArr.length) : null;
+  const avg = mean(destArr), worst = destArr.length ? Math.max(...destArr) : null;
+  const canc = runs.length - ran.length;
+  const g = (v, a, b) => v == null ? "" : v <= a ? "good" : v <= b ? "warn" : "bad";
+  el.innerHTML = `
+    <div class="stat"><div class="k">Trains</div><div class="v">${runs.length}</div></div>
+    <div class="stat"><div class="k">On time @ ${STOP_META[destName].short}</div>
+      <div class="v ${pct == null ? "" : pct >= 80 ? "good" : pct >= 50 ? "warn" : "bad"}">${pct == null ? "–" : pct + "%"}</div></div>
+    <div class="stat"><div class="k">Avg arr. @ dest</div>
+      <div class="v ${g(avg, 1, 3)}">${fmtAvg(avg)}${avg == null ? "" : "m"}</div></div>
+    <div class="stat"><div class="k">Worst arr. @ dest</div>
+      <div class="v ${g(worst, 0, 5)}">${worst == null ? "–" : fmtDelay(worst) + "m"}${canc ? ` · ${canc} canc.` : ""}</div></div>`;
+}
+
+function renderStopTable(runs) {
+  const el = document.getElementById("stop-table");
+  document.getElementById("stop-note").textContent = "avg across all trains that day";
+  if (!runs.length) { el.innerHTML = `<div class="empty">No trains for this day yet.</div>`; return; }
+  const order = STOP_ORDER[curDir];
+  let body = "";
+  for (const stop of order) {
+    const cells = runs.map(r => r.byStop[stop]).filter(Boolean);
+    const ran = cells.filter(c => !c.canceled);
+    const arr = ran.map(c => c.arr), dep = ran.map(c => c.dep);
+    const aAvg = mean(arr), dAvg = mean(dep);
+    const aMax = arr.length ? Math.max(...arr) : null;
+    const onTime = arr.filter(m => m <= 0).length;
+    const pct = arr.length ? Math.round(100 * onTime / arr.length) : null;
+    const sched = cells.length ? cells[0] : null;
+    body += `<tr>
+      <td class="stopname">${STOP_META[stop] ? STOP_META[stop].full : stop}</td>
+      <td class="sched">${sched ? (sched.sched_arr || "–") + " / " + (sched.sched_dep || "–") : "–"}</td>
+      <td><span class="pill ${delayClass(aAvg)}">${fmtAvg(aAvg)}</span></td>
+      <td><span class="pill ${delayClass(dAvg)}">${fmtAvg(dAvg)}</span></td>
+      <td><span class="pill ${delayClass(aMax)}">${fmtDelay(aMax)}</span></td>
+      <td class="pct ${pct == null ? "" : pct >= 80 ? "d0" : pct >= 50 ? "d2" : "d4"}">${pct == null ? "–" : pct + "%"}</td>
+      <td>${ran.length}${cells.length - ran.length ? ` <span class="pill dx">${cells.length - ran.length} canc</span>` : ""}</td>
+    </tr>`;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>Stop</th><th>Sched arr/dep</th><th>Avg arr</th><th>Avg dep</th><th>Max arr</th><th>On time</th><th>Trains</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+}
+
+function renderMatrix(runs) {
+  const el = document.getElementById("matrix");
+  document.getElementById("mx-note").textContent = `${curMetric === "arr" ? "arrival" : "departure"} delay (min) per stop`;
+  if (!runs.length) { el.innerHTML = `<div class="empty">No trains for this day yet.</div>`; return; }
+  const order = STOP_ORDER[curDir];
+  const head = `<tr><th class="train">Train</th>${order.map(s => `<th>${STOP_META[s] ? STOP_META[s].short : s}</th>`).join("")}</tr>`;
+  const rows = runs.map(run => {
+    const cells = order.map(stop => {
+      const c = run.byStop[stop];
+      if (!c) return `<td><span class="cell" style="background:#1a2235;color:var(--muted)">·</span></td>`;
+      if (c.canceled) return `<td><span class="cell dx">✕</span></td>`;
+      const m = curMetric === "arr" ? c.arr : c.dep;
+      return `<td><span class="cell ${delayClass(m)}">${fmtDelay(m)}</span></td>`;
+    }).join("");
+    return `<tr><td class="train"><span class="dep">${run.dep_time}</span><span class="ic">${run.train}</span></td>${cells}</tr>`;
+  }).join("");
+  el.innerHTML = `<table class="matrix"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  const items = [["d0", "≤0"], ["d1", "1–2"], ["d2", "3–4"], ["d3", "5–9"], ["d4", "10+"], ["dx", "cancelled"]];
+  el.innerHTML = `<span>delay (min):</span>` + items.map(([c, t]) =>
+    `<span class="sw"><span class="box ${c}"></span>${t}</span>`).join("");
+}
+
+function renderHeatmap() {
+  const el = document.getElementById("heatmap");
+  document.getElementById("heat-note").textContent =
+    `avg ${curMetric === "arr" ? "arrival" : "departure"} delay per stop, by day`;
+  const order = STOP_ORDER[curDir];
+  const dates = loggedDates().slice(0, 30).reverse();   // oldest→newest, cap 30 cols
+  const cols = dates.map(d => ({ key: d, label: fmtDay(d), today: false }));
+  const liveRows = LIVE[curDir];
+  if (liveRows && liveRows.length) cols.push({ key: "live", label: "Today", today: true });
+  if (!cols.length) { el.innerHTML = `<div class="empty">No logged days yet — history appears after the first evening run.</div>`; return; }
+
+  // avg per (stop, col)
+  function avgFor(stop, colKey) {
+    const rows = colKey === "live"
+      ? liveRows.filter(r => r.stop === stop && !r.canceled)
+      : ROWS.filter(r => r.direction === curDir && r.date === colKey && r.stop === stop && !r.canceled);
+    return mean(rows.map(val));
+  }
+  const head = `<tr><th class="stop">Stop</th>${cols.map(c => `<th class="${c.today ? "today" : ""}">${c.label}</th>`).join("")}</tr>`;
+  const body = order.map(stop => {
+    const cells = cols.map(c => {
+      const a = avgFor(stop, c.key);
+      return `<td><span class="cell ${delayClass(a)}">${a == null ? "·" : fmtAvg(a)}</span></td>`;
+    }).join("");
+    return `<tr><td class="stop">${STOP_META[stop] ? STOP_META[stop].full : stop}</td>${cells}</tr>`;
+  }).join("");
+  el.innerHTML = `<table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// ---------- orchestration ----------
+function renderAll() {
+  const rows = currentRows();
+  const runs = groupRuns(rows);
+  renderDayStats(runs);
+  renderStopTable(runs);
+  renderMatrix(runs);
+  renderLegend();
+  renderHeatmap();
+}
+
+async function refresh({ reloadLive = false } = {}) {
+  renderDaySelect();
+  // If today is selected and live not yet loaded, show spinner and fetch.
+  if (curDay === "live" && (reloadLive || !LIVE[curDir])) {
+    if (reloadLive) LIVE[curDir] = null;
+    for (const id of ["stop-table", "matrix"]) document.getElementById(id).innerHTML =
+      `<div class="loading"><span class="spin"></span>Fetching today's trains live from iRail…</div>`;
+    document.getElementById("day-stats").innerHTML = "";
+    try { await loadLive(curDir); }
+    catch (err) {
+      document.getElementById("stop-table").innerHTML = `<div class="error">Couldn't load live data: ${err.message}</div>`;
+      document.getElementById("matrix").innerHTML = "";
+    }
+  }
+  renderAll();
+  document.getElementById("updated").textContent =
+    "Updated " + new Date().toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+// ---------- events ----------
+document.getElementById("dir-seg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.dir === curDir) return;
+  curDir = b.dataset.dir;
+  for (const x of e.currentTarget.querySelectorAll("button")) x.classList.toggle("active", x === b);
+  refresh();
+});
+document.getElementById("metric-seg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.metric === curMetric) return;
+  curMetric = b.dataset.metric;
+  for (const x of e.currentTarget.querySelectorAll("button")) x.classList.toggle("active", x === b);
+  renderAll();   // metric only affects rendering, no refetch
+});
+document.getElementById("day").addEventListener("change", e => { curDay = e.target.value; refresh(); });
+
+// ---------- boot ----------
+(async function () {
+  todayISO = isoToday();
+  await loadHistory();
+  await refresh();
+})();
+</script>
+</body>
+</html>
