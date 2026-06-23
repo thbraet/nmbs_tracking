@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NMBS Live Board — Diest · Halle · Brussels</title>
+<title>NMBS Live Board — Diest · Leuven · Halle · Brussels</title>
 <style>
   :root {
     --bg: #0b0f1a;
@@ -113,7 +113,7 @@
   <header class="top">
     <div class="brand">
       <h1>🚆 Live Board</h1>
-      <span class="sub">NMBS / SNCB — Diest · Halle · Brussels-North · Brussels-Central</span>
+      <span class="sub">NMBS / SNCB — Diest · Leuven · Halle · Brussel-Noord · -Centraal · -Zuid</span>
     </div>
     <div class="controls">
       <div class="seg" id="mode-toggle">
@@ -135,19 +135,27 @@
   </footer>
 
 <script>
-const STATIONS = ["Diest", "Halle", "Brussels-North", "Brussels-Central"];
+// iRail station name + friendly display label + a DOM-safe key.
+const STATIONS = [
+  { api: "Diest",                        label: "Diest" },
+  { api: "Leuven",                       label: "Leuven" },
+  { api: "Halle",                        label: "Halle" },
+  { api: "Brussels-North",               label: "Brussel-Noord" },
+  { api: "Brussels-Central",             label: "Brussel-Centraal" },
+  { api: "Brussels-South/Brussels-Midi", label: "Brussel-Zuid" },
+].map(s => ({ ...s, key: s.label.replace(/[^A-Za-z]/g, "") }));
 const API = "https://api.irail.be/v1/liveboard";
 let MODE = "departure";           // "departure" | "arrival"
 let timer = null;
 
 // Build a panel per station once.
 const grid = document.getElementById("grid");
-for (const name of STATIONS) {
+for (const st of STATIONS) {
   const sec = document.createElement("section");
   sec.className = "panel";
-  sec.id = "panel-" + name;
-  sec.innerHTML = `<h2><span class="dot"></span> ${name} <span class="count" id="count-${name}"></span></h2>
-    <div class="body" id="body-${name}"><div class="empty">Loading…</div></div>`;
+  sec.id = "panel-" + st.key;
+  sec.innerHTML = `<h2><span class="dot"></span> ${st.label} <span class="count" id="count-${st.key}"></span></h2>
+    <div class="body" id="body-${st.key}"><div class="empty">Loading…</div></div>`;
   grid.appendChild(sec);
 }
 
@@ -200,10 +208,10 @@ function renderRow(t, mode) {
     </div>`;
 }
 
-async function loadStation(name) {
-  const body = document.getElementById("body-" + name);
-  const count = document.getElementById("count-" + name);
-  const url = `${API}?station=${encodeURIComponent(name)}&arrdep=${MODE}&format=json&lang=en&alerts=true`;
+async function loadStation(st) {
+  const body = document.getElementById("body-" + st.key);
+  const count = document.getElementById("count-" + st.key);
+  const url = `${API}?station=${encodeURIComponent(st.api)}&arrdep=${MODE}&format=json&lang=en&alerts=true`;
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -218,7 +226,7 @@ async function loadStation(name) {
       : `<div class="empty">No upcoming ${word} right now.</div>`;
   } catch (err) {
     count.textContent = "";
-    body.innerHTML = `<div class="error">Couldn't load ${name}: ${err.message}.<br>Check your connection and try Refresh.</div>`;
+    body.innerHTML = `<div class="error">Couldn't load ${st.label}: ${err.message}.<br>Check your connection and try Refresh.</div>`;
   }
 }
 
@@ -243,8 +251,8 @@ document.getElementById("mode-toggle").addEventListener("click", (e) => {
   for (const btn of document.querySelectorAll("#mode-toggle button"))
     btn.classList.toggle("active", btn.dataset.mode === MODE);
   // clear stale rows so the switch is visibly instant
-  for (const name of STATIONS)
-    document.getElementById("body-" + name).innerHTML = `<div class="empty">Loading…</div>`;
+  for (const st of STATIONS)
+    document.getElementById("body-" + st.key).innerHTML = `<div class="empty">Loading…</div>`;
   loadAll();
 });
 

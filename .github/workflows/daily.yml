@@ -49,7 +49,7 @@ jobs:
         if: steps.gate.outputs.proceed == 'true'
         run: pip install --quiet certifi
 
-      - name: Fetch today's direct trips for all routes
+      - name: Fetch today's direct trips across the monitored network
         if: steps.gate.outputs.proceed == 'true'
         run: python fetch_log.py
 

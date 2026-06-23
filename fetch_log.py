@@ -1,16 +1,34 @@
 #!/usr/bin/env python3
-"""Fetch today's DIRECT NMBS train departures for every tracked route and
-append them to a daily log.
+"""Fetch today's DIRECT NMBS trains across the monitored station network and log
+their per-stop delays.
 
-Tracked routes (both directions of each pair):
-  Diest <-> Halle
-  Diest <-> Brussels-North  (Brussel-Noord)
-  Diest <-> Brussels-Central (Brussel-Centraal)
+What "monitored network" means
+------------------------------
+We watch six stations:
 
-Writes two things under ./log/:
-  - <YYYY-MM-DD>.json : full detail + summary for that day, keyed per route
-  - history.csv       : one appended row per train per day per route (the
-                        long-term log; carries a `route` column)
+    Diest, Halle, Leuven, Brussels-North, Brussels-Central, Brussels-South
+
+Of these, three are ANCHORS — Diest, Halle, Leuven. A train is only interesting
+if its trajectory visits **at least one anchor** *and* **at least two monitored
+stations**. That rule deliberately excludes the firehose of trains that merely
+clip two Brussels stations on their way between, say, Mons and Antwerp: a pure
+Brussels↔Brussels hop has no anchor, so it is dropped. But a Knokke→Liège IC
+that passes Brussels-South → Central → North → Leuven *is* kept (Leuven is an
+anchor) and we log its Brussels↔Leuven segment.
+
+For every kept train we slice its full stop list to the span between the first
+and last monitored stop (inclusive — intermediary non-monitored stops like
+Aarschot or Brussels Airport are kept so you can watch delays evolve along the
+trajectory) and call that the train's "segment", labelled origin → dest by the
+first/last monitored stop.
+
+Outputs (under ./log/, both idempotent per day)
+-----------------------------------------------
+  - trips_history.csv : one row per train per day — segment endpoints plus the
+                        origin departure delay and dest arrival delay. Compact;
+                        powers the long-term overview.
+  - stops_history.csv : one row per train per stop per day along the segment.
+                        Powers the stop-by-stop deep dive and multi-day heatmap.
 
 iRail only keeps real-time delay values for the *current* day, so this script
 must run late in the evening (Brussels time) to capture a full day of trips.
@@ -24,7 +42,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -33,31 +51,35 @@ CONN_URL = "https://api.irail.be/v1/connections"
 VEHICLE_URL = "https://api.irail.be/v1/vehicle/"
 LOG_DIR = Path(__file__).resolve().parent / "log"
 
-# The Diest <-> Halle trajectory is a slice of a much longer IC line. We capture
-# the per-stop delays only between these two endpoints (inclusive). Direction is
-# inferred from their relative order in the vehicle's full stop list.
-SEGMENT_ENDPOINTS = ("Diest", "Halle")
+# The six monitored stations, by their iRail station names. ANCHORS are the
+# subset that make a trajectory worth tracking; the Brussels trio are pass-
+# through only and count solely when an anchor is also on the route.
+MONITORED = {
+    "Diest", "Halle", "Leuven",
+    "Brussels-North", "Brussels-Central", "Brussels-South/Brussels-Midi",
+}
+ANCHORS = {"Diest", "Halle", "Leuven"}
+
+# Ordered station pairs we sweep on the connections endpoint to *discover* the
+# vehicles that touch the network. We sweep every ordered pair with at least one
+# anchor endpoint (i.e. everything except Brussels→Brussels). connections(A,B)
+# returns any direct train whose run includes A…B, so a train terminating at a
+# Brussels station is still found via its anchor end, and a through train (e.g.
+# Knokke→Liège) is found via connections(Brussels-X, Leuven). Deduped by vehicle.
+DISCOVERY_PAIRS = [(a, b) for a in MONITORED for b in MONITORED
+                   if a != b and (a in ANCHORS or b in ANCHORS)]
 
 # --- iRail API politeness ---------------------------------------------------
 # iRail asks for a descriptive User-Agent (ideally with a contact/URL) and rate-
 # limits to a few requests per second. We space requests out well under that cap
-# and back off on errors so a full multi-route run never trips the limiter.
-USER_AGENT = ("nmbs-diest-tracker/1.0 (personal daily delay log; "
+# and back off on errors. A full run is ~24 connection sweeps to discover the
+# day's vehicles plus one /vehicle fetch per unique vehicle (a few hundred all
+# told) — sustained ~1.4 req/s stays comfortably under iRail's ~3 req/s ceiling.
+USER_AGENT = ("nmbs-network-tracker/2.0 (personal daily delay log; "
               "+https://github.com/thbraet/nmbs_tracking)")
-MIN_REQUEST_INTERVAL = 0.7   # seconds between requests (~1.4 req/s, under iRail's ~3/s)
+MIN_REQUEST_INTERVAL = 0.7   # seconds between requests (~1.4 req/s)
 MAX_RETRIES = 5
 _last_request_at = 0.0       # monotonic timestamp of the previous request
-
-# Each route: stable slug, the API station names, and a friendly label.
-# Slugs are also used by the dashboard to filter history.csv, so keep them stable.
-ROUTES = [
-    {"slug": "diest-halle",            "from": "Diest",            "to": "Halle"},
-    {"slug": "halle-diest",            "from": "Halle",            "to": "Diest"},
-    {"slug": "diest-brussels-north",   "from": "Diest",            "to": "Brussels-North"},
-    {"slug": "brussels-north-diest",   "from": "Brussels-North",   "to": "Diest"},
-    {"slug": "diest-brussels-central", "from": "Diest",            "to": "Brussels-Central"},
-    {"slug": "brussels-central-diest", "from": "Brussels-Central", "to": "Diest"},
-]
 
 # Verified TLS context (use certifi if available; falls back to system store).
 try:
@@ -80,8 +102,8 @@ def _get_json(url: str, label: str) -> dict:
     """GET one iRail endpoint as JSON, throttled and with retry/backoff.
 
     Retries on rate limiting (HTTP 429, honoring Retry-After), transient 5xx,
-    network errors, and malformed JSON, with exponential backoff. `label` is
-    only used to make the give-up error message legible."""
+    network errors, and malformed JSON, with exponential backoff. `label` only
+    makes the give-up error message legible."""
     last_err = None
     for attempt in range(MAX_RETRIES):
         _throttle()
@@ -110,7 +132,7 @@ def _get_json(url: str, label: str) -> dict:
                        f"({label}): {last_err}")
 
 
-def fetch(frm: str, to: str, date_ddmmyy: str, time_hhmm: str) -> dict:
+def fetch_connections(frm: str, to: str, date_ddmmyy: str, time_hhmm: str) -> dict:
     """Fetch one connections page."""
     params = urllib.parse.urlencode({
         "from": frm, "to": to, "date": date_ddmmyy, "time": time_hhmm,
@@ -127,68 +149,60 @@ def fetch_vehicle(vehicle_id: str, date_ddmmyy: str) -> dict:
     return _get_json(f"{VEHICLE_URL}?{params}", f"vehicle {vehicle_id}")
 
 
-def collect_direct_trips(frm: str, to: str, now: datetime) -> list[dict]:
-    """Paginate the connections endpoint across the whole day and return all
-    DIRECT (0-transfer) trips that have already departed by `now`."""
+# --- Discovery --------------------------------------------------------------
+
+def _vehicle_id(dep: dict) -> tuple[str, str]:
+    """Return (normalized id, display shortname) for a connection departure."""
+    short = (dep.get("vehicleinfo") or {}).get("shortname") \
+        or dep.get("vehicle", "").split(".")[-1]
+    return short.replace(" ", ""), short
+
+
+def sweep_pair(frm: str, to: str, now: datetime) -> dict[str, str]:
+    """Paginate one O-D across the whole day; return {vehicle_id: shortname} for
+    every DIRECT (0-transfer) trip. Spans 00:00 → end of day regardless of the
+    current time so a single late-evening run captures the full day."""
     date_ddmmyy = now.strftime("%d%m%y")
-    now_sec = int(now.timestamp())
-    trips: dict[str, dict] = {}
-    cursor = now.replace(hour=0, minute=0, second=0, microsecond=0)  # start of today
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = (day_start + timedelta(days=1)).timestamp()
+    found: dict[str, str] = {}
+    cursor = day_start
     last_dep = 0
 
     for _ in range(40):  # generous page guard
-        data = fetch(frm, to, date_ddmmyy, cursor.strftime("%H%M"))
+        data = fetch_connections(frm, to, date_ddmmyy, cursor.strftime("%H%M"))
         conns = data.get("connection", []) or []
         if not conns:
             break
-
         for c in conns:
             if int((c.get("vias") or {}).get("number", "0")) != 0:
                 continue  # skip anything requiring a transfer
-            dep, arr = c["departure"], c["arrival"]
-            dep_t = int(dep["time"])
-            if dep_t > now_sec:
-                continue  # not departed yet
-            veh = (dep.get("vehicleinfo") or {}).get("shortname") \
-                or dep.get("vehicle", "").split(".")[-1]
-            trips[f"{dep_t}|{veh}"] = {
-                "dep_unix": dep_t,
-                "dep_time": datetime.fromtimestamp(dep_t, BXL).strftime("%H:%M"),
-                "train": veh,
-                "platform": (dep.get("platforminfo") or {}).get("name") or dep.get("platform") or "",
-                "dep_delay_min": round(int(dep.get("delay", "0")) / 60),
-                "arr_delay_sec": int(arr.get("delay", "0")),
-                "arr_delay_min": round(int(arr.get("delay", "0")) / 60),
-                "canceled": dep.get("canceled") == "1" or arr.get("canceled") == "1",
-            }
+            if int(c["departure"]["time"]) >= day_end:
+                continue  # spilled into tomorrow
+            vid, short = _vehicle_id(c["departure"])
+            if vid:
+                found[vid] = short
 
         max_dep = max(int(c["departure"]["time"]) for c in conns)
         if max_dep <= last_dep:
             max_dep = last_dep + 3600  # force forward progress
         last_dep = max_dep
-        if last_dep > now_sec + 1800:
+        if last_dep >= day_end:
             break
         cursor = datetime.fromtimestamp(last_dep + 60, BXL)
 
-    return sorted(trips.values(), key=lambda t: t["dep_unix"])
+    return found
 
 
-def summarize(trips: list[dict]) -> dict:
-    ran = [t for t in trips if not t["canceled"]]
-    arr = [t["arr_delay_min"] for t in ran]
-    on_time = sum(1 for m in arr if m <= 0)
-    return {
-        "total_trips": len(trips),
-        "cancelled": len(trips) - len(ran),
-        "on_time": on_time,
-        "late": sum(1 for m in arr if m > 0),
-        "on_time_pct": round(100 * on_time / len(arr)) if arr else None,
-        "avg_arr_delay_min": round(sum(arr) / len(arr), 2) if arr else None,
-        "max_arr_delay_min": max(arr) if arr else None,
-    }
+def discover_vehicles(now: datetime) -> dict[str, str]:
+    """Sweep every discovery pair and return the union {vehicle_id: shortname}."""
+    vehicles: dict[str, str] = {}
+    for frm, to in DISCOVERY_PAIRS:
+        vehicles.update(sweep_pair(frm, to, now))
+    return vehicles
 
 
-# --- Per-stop trajectory (Diest <-> Halle) ---------------------------------
+# --- Segment extraction -----------------------------------------------------
 
 def _hhmm(ts) -> str:
     ts = int(ts or 0)
@@ -201,11 +215,13 @@ def _is_set(v) -> bool:
 
 def _stop_row(seq: int, s: dict) -> dict:
     """Flatten one iRail vehicle stop into our per-stop schema."""
+    station = s.get("station", "")
     arr_sec = int(s.get("arrivalDelay", "0") or 0)
     dep_sec = int(s.get("departureDelay", "0") or 0)
     return {
         "seq": seq,
-        "stop": s.get("station", ""),
+        "stop": station,
+        "monitored": station in MONITORED,
         "sched_arr": _hhmm(s.get("scheduledArrivalTime")),
         "sched_dep": _hhmm(s.get("scheduledDepartureTime")),
         "arr_delay_sec": arr_sec,
@@ -219,162 +235,120 @@ def _stop_row(seq: int, s: dict) -> dict:
 
 
 def extract_segment(stops: list[dict]) -> dict | None:
-    """Slice a vehicle's full stop list down to the Diest<->Halle segment
-    (inclusive). Returns {direction, stops} or None if the run doesn't serve
-    both endpoints. Direction follows travel order: diest-halle | halle-diest."""
-    idx = {}
-    for i, s in enumerate(stops):
-        if s.get("station") in SEGMENT_ENDPOINTS:
-            idx[s["station"]] = i
-    if "Diest" not in idx or "Halle" not in idx:
+    """Slice a vehicle's full stop list to the monitored segment (first → last
+    monitored stop, inclusive). Returns {origin, dest, stops} or None if the run
+    doesn't qualify (fewer than two monitored stops, or no anchor among them)."""
+    monitored = [(i, s.get("station")) for i, s in enumerate(stops)
+                 if s.get("station") in MONITORED]
+    if len(monitored) < 2:
         return None
-    i_d, i_h = idx["Diest"], idx["Halle"]
-    lo, hi = (i_d, i_h) if i_d < i_h else (i_h, i_d)
-    direction = "diest-halle" if i_d < i_h else "halle-diest"
+    if not any(name in ANCHORS for _, name in monitored):
+        return None
+    lo, hi = monitored[0][0], monitored[-1][0]
     seg = [_stop_row(seq, s) for seq, s in enumerate(stops[lo:hi + 1])]
-    return {"direction": direction, "stops": seg}
+    return {"origin": stops[lo]["station"], "dest": stops[hi]["station"],
+            "stops": seg}
 
 
-def collect_segments(per_route: list[dict], date_ddmmyy: str) -> list[dict]:
-    """For every direct Diest<->Halle train already collected, fetch its full
-    vehicle detail and keep the per-stop delays along the Diest<->Halle segment.
+def collect_runs(vehicles: dict[str, str], date_ddmmyy: str) -> list[dict]:
+    """Fetch each discovered vehicle, keep the ones with a qualifying segment.
 
-    Only the diest-halle / halle-diest routes are walked — those are exactly the
-    trains that serve both endpoints, so one vehicle fetch per train covers the
-    whole trajectory (both Brussels stops included) without duplication."""
+    Returns a list of runs: {train, origin, dest, dep_time, stops}. One bad
+    vehicle (e.g. JourneyNotFoundException) is skipped, never fatal."""
     runs = []
-    seen = set()
-    for r in per_route:
-        if r["route"] not in ("diest-halle", "halle-diest"):
+    for vid, short in sorted(vehicles.items()):
+        try:
+            data = fetch_vehicle(vid, date_ddmmyy)
+        except Exception as e:                     # one bad train shouldn't sink the run
+            print(f"  vehicle {vid} failed: {e}", file=sys.stderr)
             continue
-        for t in r["trips"]:
-            vid = t["train"].replace(" ", "")
-            if not vid or vid in seen:
-                continue
-            seen.add(vid)
-            try:
-                data = fetch_vehicle(vid, date_ddmmyy)
-            except Exception as e:                 # one bad train shouldn't sink the run
-                print(f"  vehicle {vid} failed: {e}", file=sys.stderr)
-                continue
-            stops = (data.get("stops") or {}).get("stop") or []
-            seg = extract_segment(stops)
-            if not seg:
-                print(f"  vehicle {vid}: no Diest<->Halle segment, skipped", file=sys.stderr)
-                continue
-            runs.append({"train": t["train"], "dep_time": t["dep_time"], **seg})
+        stops = (data.get("stops") or {}).get("stop") or []
+        seg = extract_segment(stops)
+        if not seg:
+            continue
+        first = seg["stops"][0]
+        runs.append({
+            "train": short, "dep_time": first["sched_dep"] or first["sched_arr"],
+            **seg,
+        })
+    runs.sort(key=lambda r: (r["origin"], r["dest"], r["dep_time"]))
     return runs
 
 
-CSV_COLS = ["date", "route", "from", "to", "dep_time", "train", "platform",
-            "dep_delay_min", "arr_delay_min", "arr_delay_sec", "canceled"]
+# --- Outputs ----------------------------------------------------------------
 
-STOPS_CSV_COLS = ["date", "direction", "train", "dep_time", "seq", "stop",
-                  "sched_arr", "sched_dep", "arr_delay_min", "arr_delay_sec",
+TRIPS_CSV_COLS = ["date", "origin", "dest", "train", "dep_time",
+                  "dep_delay_min", "arr_delay_min", "arr_delay_sec", "canceled"]
+
+STOPS_CSV_COLS = ["date", "origin", "dest", "train", "dep_time", "seq", "stop",
+                  "monitored", "sched_arr", "sched_dep",
+                  "arr_delay_min", "arr_delay_sec",
                   "dep_delay_min", "dep_delay_sec", "canceled"]
 
 
-def write_outputs(date_iso: str, per_route: list[dict]) -> None:
-    """per_route: list of {route, from, to, trips, summary} for the day."""
+def _upsert_csv(path: Path, cols: list[str], date_iso: str, new_rows: list[dict]) -> None:
+    """Rewrite `path` keeping every row whose date != date_iso, then append
+    new_rows. Idempotent per day: re-running a date never duplicates it."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Per-day JSON (overwrite — the final snapshot for that day, keyed per route).
-    day_file = LOG_DIR / f"{date_iso}.json"
-    day_file.write_text(json.dumps(
-        {"date": date_iso,
-         "routes": {r["route"]: {"from": r["from"], "to": r["to"],
-                                 "summary": r["summary"], "trips": r["trips"]}
-                    for r in per_route}},
-        indent=2, ensure_ascii=False))
-
-    # Upsert per-trip rows into the long-term history CSV. One run regenerates the
-    # whole day across all routes, so we drop every existing row for `date_iso`
-    # and re-add the fresh ones (idempotent — re-runs never duplicate).
-    hist = LOG_DIR / "history.csv"
     kept = []
-    if hist.exists():
-        with hist.open(newline="") as f:
-            for row in csv.DictReader(f):
-                if row.get("date") == date_iso:
-                    continue
-                # Migrate legacy rows (no `route` column) → the original route.
-                row.setdefault("route", "diest-halle")
-                row.setdefault("from", "Diest")
-                row.setdefault("to", "Halle")
-                kept.append(row)
-
-    with hist.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=CSV_COLS, extrasaction="ignore")
+    if path.exists():
+        with path.open(newline="") as f:
+            kept = [row for row in csv.DictReader(f) if row.get("date") != date_iso]
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for row in kept:
             w.writerow(row)
-        for r in per_route:
-            for t in r["trips"]:
-                w.writerow({
-                    "date": date_iso, "route": r["route"],
-                    "from": r["from"], "to": r["to"],
-                    "dep_time": t["dep_time"], "train": t["train"],
-                    "platform": t["platform"], "dep_delay_min": t["dep_delay_min"],
-                    "arr_delay_min": t["arr_delay_min"], "arr_delay_sec": t["arr_delay_sec"],
-                    "canceled": int(t["canceled"]),
-                })
-
-
-def write_stops(date_iso: str, runs: list[dict]) -> None:
-    """Upsert per-stop rows into log/stops_history.csv. Like history.csv this is
-    idempotent per day: drop every existing row for `date_iso`, re-add the fresh
-    ones. One row per train per stop along the Diest<->Halle segment."""
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    hist = LOG_DIR / "stops_history.csv"
-    kept = []
-    if hist.exists():
-        with hist.open(newline="") as f:
-            for row in csv.DictReader(f):
-                if row.get("date") != date_iso:
-                    kept.append(row)
-
-    with hist.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=STOPS_CSV_COLS, extrasaction="ignore")
-        w.writeheader()
-        for row in kept:
+        for row in new_rows:
             w.writerow(row)
-        for run in runs:
-            for st in run["stops"]:
-                w.writerow({
-                    "date": date_iso, "direction": run["direction"],
-                    "train": run["train"], "dep_time": run["dep_time"],
-                    "seq": st["seq"], "stop": st["stop"],
-                    "sched_arr": st["sched_arr"], "sched_dep": st["sched_dep"],
-                    "arr_delay_min": st["arr_delay_min"], "arr_delay_sec": st["arr_delay_sec"],
-                    "dep_delay_min": st["dep_delay_min"], "dep_delay_sec": st["dep_delay_sec"],
-                    "canceled": int(st["canceled"]),
-                })
+
+
+def write_outputs(date_iso: str, runs: list[dict]) -> None:
+    trip_rows, stop_rows = [], []
+    for run in runs:
+        first, last = run["stops"][0], run["stops"][-1]
+        trip_rows.append({
+            "date": date_iso, "origin": run["origin"], "dest": run["dest"],
+            "train": run["train"], "dep_time": run["dep_time"],
+            "dep_delay_min": first["dep_delay_min"],
+            "arr_delay_min": last["arr_delay_min"],
+            "arr_delay_sec": last["arr_delay_sec"],
+            "canceled": int(last["canceled"]),
+        })
+        for st in run["stops"]:
+            stop_rows.append({
+                "date": date_iso, "origin": run["origin"], "dest": run["dest"],
+                "train": run["train"], "dep_time": run["dep_time"],
+                "seq": st["seq"], "stop": st["stop"], "monitored": int(st["monitored"]),
+                "sched_arr": st["sched_arr"], "sched_dep": st["sched_dep"],
+                "arr_delay_min": st["arr_delay_min"], "arr_delay_sec": st["arr_delay_sec"],
+                "dep_delay_min": st["dep_delay_min"], "dep_delay_sec": st["dep_delay_sec"],
+                "canceled": int(st["canceled"]),
+            })
+    _upsert_csv(LOG_DIR / "trips_history.csv", TRIPS_CSV_COLS, date_iso, trip_rows)
+    _upsert_csv(LOG_DIR / "stops_history.csv", STOPS_CSV_COLS, date_iso, stop_rows)
 
 
 def main() -> int:
     now = datetime.now(BXL)
     date_iso = now.strftime("%Y-%m-%d")
 
-    per_route = []
-    for r in ROUTES:
-        trips = collect_direct_trips(r["from"], r["to"], now)
-        summary = summarize(trips)
-        per_route.append({"route": r["slug"], "from": r["from"], "to": r["to"],
-                          "trips": trips, "summary": summary})
-        print(f"[{date_iso}] {r['from']} -> {r['to']} direct: "
-              f"{summary['total_trips']} trips, "
-              f"{summary['on_time_pct']}% on time, "
-              f"avg arr delay {summary['avg_arr_delay_min']} min, "
-              f"max {summary['max_arr_delay_min']} min "
-              f"(cancelled: {summary['cancelled']})")
+    print(f"[{date_iso}] discovering vehicles across {len(DISCOVERY_PAIRS)} "
+          f"connection sweeps…")
+    vehicles = discover_vehicles(now)
+    print(f"[{date_iso}] {len(vehicles)} unique direct vehicles touch the network; "
+          f"fetching each /vehicle…")
 
-    write_outputs(date_iso, per_route)
+    runs = collect_runs(vehicles, now.strftime("%d%m%y"))
+    write_outputs(date_iso, runs)
 
-    # Per-stop trajectory log for the Diest<->Halle deep-dive view.
-    runs = collect_segments(per_route, now.strftime("%d%m%y"))
-    write_stops(date_iso, runs)
+    segments = sorted({(r["origin"], r["dest"]) for r in runs})
     n_stops = sum(len(r["stops"]) for r in runs)
-    print(f"[{date_iso}] per-stop: {len(runs)} Diest<->Halle runs, {n_stops} stop rows")
+    print(f"[{date_iso}] kept {len(runs)} runs across {len(segments)} segments, "
+          f"{n_stops} stop rows")
+    for origin, dest in segments:
+        n = sum(1 for r in runs if r["origin"] == origin and r["dest"] == dest)
+        print(f"    {origin} → {dest}: {n} trains")
     return 0
 
 

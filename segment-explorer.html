@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NMBS — Diest ⇄ Halle stop-by-stop</title>
+<title>NMBS — segment delay explorer</title>
 <style>
   :root {
     --bg: #0b0f1a; --panel: #121a2b; --panel-2: #0e1626; --line: #1f2c45;
@@ -35,8 +35,8 @@
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button:hover { color: var(--text); }
   .seg button.active { background: rgba(77,155,255,.18); color: var(--accent); }
-  select#day { appearance: none; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-    border-radius: 9px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  select.sel { appearance: none; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; max-width: 320px; }
   .updated { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
   .panel { max-width: 1200px; margin: 0 auto 22px; background: linear-gradient(180deg, var(--panel), var(--panel-2));
@@ -59,6 +59,7 @@
   th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
   td { font-variant-numeric: tabular-nums; }
   td.stopname { font-weight: 600; }
+  td.stopname .via { color: var(--muted); font-weight: 500; font-size: 11px; margin-left: 6px; }
   td.sched { color: var(--muted); font-size: 12px; }
   .scroll { overflow-x: auto; }
 
@@ -84,7 +85,7 @@
   /* heatmap */
   table.heat th, table.heat td { text-align: center; padding: 6px 7px; }
   table.heat th.stop, table.heat td.stop { text-align: left; position: sticky; left: 0; background: var(--panel-2); z-index: 1; font-weight: 600; }
-  table.heat td .cell { display: block; min-width: 34px; padding: 4px 3px; border-radius: 5px; font-weight: 700; font-size: 11.5px; color: #fff; }
+  table.heat td.stop .via { color: var(--muted); font-weight: 500; font-size: 11px; margin-left: 6px; }
   table.heat th.today { color: var(--amber); }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--line);
@@ -104,17 +105,14 @@
 <body>
   <a class="back" href="index.html">← all dashboards</a>
   <header class="top">
-    <h1>🛤️ Diest ⇄ Halle — stop by stop</h1>
-    <span class="sub">Per-stop arrival &amp; departure delay along the direct IC trajectory</span>
+    <h1>🛤️ Segment delay explorer</h1>
+    <span class="sub">Per-stop delay evolution along any tracked Diest / Leuven / Halle ⇄ Brussels trajectory</span>
   </header>
 
   <div class="controls">
     <div class="ctl">
-      <span class="ctl-lbl">Direction</span>
-      <div class="seg" id="dir-seg">
-        <button data-dir="diest-halle" class="active">Diest&nbsp;→&nbsp;Halle</button>
-        <button data-dir="halle-diest">Halle&nbsp;→&nbsp;Diest</button>
-      </div>
+      <span class="ctl-lbl">Segment</span>
+      <select id="seg" class="sel"></select>
     </div>
     <div class="ctl">
       <span class="ctl-lbl">Delay shown</span>
@@ -125,7 +123,7 @@
     </div>
     <div class="ctl">
       <span class="ctl-lbl">Day</span>
-      <select id="day"></select>
+      <select id="day" class="sel"></select>
     </div>
     <span class="updated" id="updated"></span>
   </div>
@@ -158,46 +156,51 @@
   <footer>
     Data: <a href="https://docs.irail.be/" target="_blank" rel="noopener">iRail open API</a>.
     Today is computed live in your browser; past days come from <code>log/stops_history.csv</code>.
-    Delays in minutes, Brussels local time.
+    A trajectory is tracked only if it visits an anchor (Diest, Leuven or Halle) and ≥2 monitored stations,
+    so pure Brussels↔Brussels runs are excluded. Delays in minutes, Brussels local time.
   </footer>
 
 <script>
 // ---------- constants ----------
-const STOP_META = {
-  "Diest":                        { full: "Diest",            short: "Diest" },
-  "Aarschot":                     { full: "Aarschot",         short: "Aarschot" },
-  "Brussels-North":               { full: "Brussel-Noord",    short: "Bxl-Noord" },
-  "Brussels-Central":             { full: "Brussel-Centraal", short: "Bxl-Centr." },
-  "Brussels-South/Brussels-Midi": { full: "Brussel-Zuid",     short: "Bxl-Zuid" },
-  "Halle":                        { full: "Halle",            short: "Halle" },
+// Friendly [full, short] labels; intermediary stops fall back to their raw name.
+const NAME = {
+  "Diest":                        ["Diest", "Diest"],
+  "Leuven":                       ["Leuven", "Leuven"],
+  "Halle":                        ["Halle", "Halle"],
+  "Aarschot":                     ["Aarschot", "Aarschot"],
+  "Brussels-North":               ["Brussel-Noord", "Bxl-Noord"],
+  "Brussels-Central":             ["Brussel-Centraal", "Bxl-Centr."],
+  "Brussels-South/Brussels-Midi": ["Brussel-Zuid", "Bxl-Zuid"],
+  "Brussels Airport - Zaventem":  ["Brussels Airport", "Bxl-Airport"],
 };
-const STOP_ORDER = {
-  "diest-halle": ["Diest", "Aarschot", "Brussels-North", "Brussels-Central", "Brussels-South/Brussels-Midi", "Halle"],
-  "halle-diest": ["Halle", "Brussels-South/Brussels-Midi", "Brussels-Central", "Brussels-North", "Aarschot", "Diest"],
-};
-const DIR_LABEL = { "diest-halle": "Diest → Halle", "halle-diest": "Halle → Diest" };
+const MONITORED = new Set(["Diest", "Halle", "Leuven",
+  "Brussels-North", "Brussels-Central", "Brussels-South/Brussels-Midi"]);
+const ANCHORS = new Set(["Diest", "Halle", "Leuven"]);
 const CONN = "https://api.irail.be/v1/connections";
 const VEH = "https://api.irail.be/v1/vehicle/";
 const pad = n => String(n).padStart(2, "0");
+const fullName = s => (NAME[s] || [s])[0];
+const shortName = s => (NAME[s] || [null, s])[1] || s;
+const segLabel = key => { const [o, d] = key.split("|"); return `${fullName(o)} → ${fullName(d)}`; };
 
 // ---------- state ----------
-let curDir = "diest-halle";
+let curSeg = null;              // "origin|dest"
 let curMetric = "arr";          // arr | dep
 let curDay = "live";            // "live" or an ISO date
-let ROWS = [];                  // flat per-stop rows from CSV (all dates, both dirs)
-let LIVE = { "diest-halle": null, "halle-diest": null };  // live rows per direction (null=not loaded)
+let STOPS = [];                 // flat per-stop rows from CSV (all dates, all segments)
+let LIVE = {};                  // segKey -> live rows (or undefined = not loaded)
 let todayISO = null;
+const orderCache = {};          // segKey -> canonical [stop names]
 
 // ---------- helpers ----------
 function isoToday() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function ddmmyy() { const d = new Date(); return pad(d.getDate()) + pad(d.getMonth() + 1) + String(d.getFullYear()).slice(2); }
 function fmtDay(iso) { return new Date(iso + "T00:00:00").toLocaleDateString("nl-BE", { weekday: "short", day: "2-digit", month: "short" }); }
 function hhmm(ts) { ts = parseInt(ts || "0", 10); return ts > 0 ? new Date(ts * 1000).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", hour12: false }) : ""; }
 function delayClass(m) { if (m == null) return ""; if (m <= 0) return "d0"; if (m <= 2) return "d1"; if (m <= 4) return "d2"; if (m <= 9) return "d3"; return "d4"; }
 function fmtDelay(m) { if (m == null) return "–"; return (m > 0 ? "+" : "") + m; }
 function fmtAvg(m) { if (m == null) return "–"; return (m > 0 ? "+" : "") + m.toFixed(1); }
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
-
-// metric accessor for a row
 const val = r => curMetric === "arr" ? r.arr : r.dep;
 
 // ---------- CSV ----------
@@ -213,46 +216,51 @@ function parseCSV(text) {
 }
 function toRow(o) {
   return {
-    date: o.date, direction: o.direction, train: o.train, dep_time: o.dep_time,
-    seq: parseInt(o.seq, 10), stop: o.stop, sched_arr: o.sched_arr, sched_dep: o.sched_dep,
+    date: o.date, origin: o.origin, dest: o.dest, segKey: o.origin + "|" + o.dest,
+    train: o.train, dep_time: o.dep_time, seq: parseInt(o.seq, 10), stop: o.stop,
+    monitored: o.monitored === "1" || o.monitored === "true",
+    sched_arr: o.sched_arr, sched_dep: o.sched_dep,
     arr: Number(o.arr_delay_min) || 0, dep: Number(o.dep_delay_min) || 0,
     canceled: o.canceled === "1" || o.canceled === "true",
   };
 }
-
 async function loadHistory() {
   try {
     const res = await fetch("log/stops_history.csv", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    ROWS = parseCSV(await res.text()).filter(o => o.date && o.direction && o.stop).map(toRow);
+    STOPS = parseCSV(await res.text()).filter(o => o.date && o.origin && o.stop).map(toRow);
   } catch (err) {
-    ROWS = [];
+    STOPS = [];
     document.getElementById("heat-note").innerHTML =
       `<span style="color:var(--red)">history unavailable (${err.message})</span>`;
   }
 }
 
 // ---------- live today ----------
-function extractSegment(stops, train, depTime) {
-  let iD = -1, iH = -1;
-  stops.forEach((s, i) => { if (s.station === "Diest") iD = i; if (s.station === "Halle") iH = i; });
-  if (iD < 0 || iH < 0) return [];
-  const [lo, hi] = iD < iH ? [iD, iH] : [iH, iD];
-  const direction = iD < iH ? "diest-halle" : "halle-diest";
-  return stops.slice(lo, hi + 1).map((s, seq) => ({
-    date: todayISO, direction, train, dep_time: depTime, seq, stop: s.station,
+// Mirror the collector exactly: slice a vehicle's stops to its monitored segment
+// (first→last monitored stop) and keep it only if that segment has an anchor.
+function extractSegment(stops, train) {
+  const mon = [];
+  stops.forEach((s, i) => { if (MONITORED.has(s.station)) mon.push([i, s.station]); });
+  if (mon.length < 2) return null;
+  if (!mon.some(([, n]) => ANCHORS.has(n))) return null;
+  const lo = mon[0][0], hi = mon[mon.length - 1][0];
+  const origin = stops[lo].station, dest = stops[hi].station;
+  const seg = stops.slice(lo, hi + 1).map((s, seq) => ({
+    seq, stop: s.station, monitored: MONITORED.has(s.station),
     sched_arr: hhmm(s.scheduledArrivalTime), sched_dep: hhmm(s.scheduledDepartureTime),
     arr: Math.round(parseInt(s.arrivalDelay || "0", 10) / 60),
     dep: Math.round(parseInt(s.departureDelay || "0", 10) / 60),
     canceled: s.canceled === "1" || s.arrivalCanceled === "1" || s.departureCanceled === "1",
   }));
+  const dep_time = seg[0].sched_dep || seg[0].sched_arr || "";
+  return { origin, dest, dep_time, train, stops: seg };
 }
 
+// enumerate today's already-departed DIRECT trains between two stations
 async function enumerateTrains(fromApi, toApi) {
-  const now = new Date();
-  const dateStr = pad(now.getDate()) + pad(now.getMonth() + 1) + String(now.getFullYear()).slice(2);
-  const nowSec = Math.floor(now.getTime() / 1000);
-  const trains = new Map();                 // veh -> {veh, depT}
+  const now = new Date(), dateStr = ddmmyy(), nowSec = Math.floor(now.getTime() / 1000);
+  const trains = new Map();
   let cursor = new Date(now); cursor.setHours(0, 0, 0, 0);
   let lastDep = 0;
   for (let i = 0; i < 30; i++) {
@@ -263,9 +271,9 @@ async function enumerateTrains(fromApi, toApi) {
     const conns = ((await res.json()).connection) || [];
     if (!conns.length) break;
     for (const c of conns) {
-      if (parseInt((c.vias && c.vias.number) || "0", 10) !== 0) continue;  // direct only
+      if (parseInt((c.vias && c.vias.number) || "0", 10) !== 0) continue;
       const depT = parseInt(c.departure.time, 10);
-      if (depT > nowSec) continue;                                          // already departed
+      if (depT > nowSec) continue;
       const veh = (c.departure.vehicleinfo && c.departure.vehicleinfo.shortname) || (c.departure.vehicle || "").split(".").pop();
       if (veh) trains.set(veh, { veh, depT });
     }
@@ -286,66 +294,98 @@ async function pool(items, n, fn) {
   return out;
 }
 
-async function loadLive(dir) {
-  if (LIVE[dir]) return LIVE[dir];
-  const order = STOP_ORDER[dir];
-  const fromApi = order[0], toApi = order[order.length - 1];
-  const dateStr = (() => { const d = new Date(); return pad(d.getDate()) + pad(d.getMonth() + 1) + String(d.getFullYear()).slice(2); })();
-  const trains = await enumerateTrains(fromApi, toApi);
-  const perTrain = await pool(trains, 3, async ({ veh, depT }) => {
+async function loadLive(segKey) {
+  if (LIVE[segKey]) return LIVE[segKey];
+  const [origin, dest] = segKey.split("|");
+  const dateStr = ddmmyy();
+  const trains = await enumerateTrains(origin, dest);
+  const perTrain = await pool(trains, 3, async ({ veh }) => {
     try {
       const res = await fetch(`${VEH}?id=${encodeURIComponent(veh.replace(/\s/g, ""))}&date=${dateStr}&format=json&lang=en`, { cache: "no-store" });
       if (!res.ok) return [];
       const stops = (((await res.json()).stops) || {}).stop || [];
-      const depLabel = new Date(depT * 1000).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit", hour12: false });
-      return extractSegment(stops, veh, depLabel).filter(r => r.direction === dir);
+      const seg = extractSegment(stops, veh);
+      // Only keep trains whose own monitored segment IS this segment — matches the log.
+      if (!seg || seg.origin !== origin || seg.dest !== dest) return [];
+      return seg.stops.map(st => ({
+        date: todayISO, origin, dest, segKey, train: veh, dep_time: seg.dep_time,
+        seq: st.seq, stop: st.stop, monitored: st.monitored,
+        sched_arr: st.sched_arr, sched_dep: st.sched_dep,
+        arr: st.arr, dep: st.dep, canceled: st.canceled,
+      }));
     } catch { return []; }
   });
-  LIVE[dir] = perTrain.flat();
-  return LIVE[dir];
+  LIVE[segKey] = perTrain.flat();
+  return LIVE[segKey];
 }
 
 // ---------- data selection ----------
-// rows for the currently selected direction + day
 function currentRows() {
-  if (curDay === "live") return (LIVE[curDir] || []);
-  return ROWS.filter(r => r.direction === curDir && r.date === curDay);
+  if (curDay === "live") return (LIVE[curSeg] || []);
+  return STOPS.filter(r => r.segKey === curSeg && r.date === curDay);
 }
-// group rows of one day into runs (trains), each {train, dep_time, byStop:{stop->row}}
 function groupRuns(rows) {
   const runs = new Map();
   for (const r of rows) {
     const key = r.train + "|" + r.dep_time;
-    if (!runs.has(key)) runs.set(key, { train: r.train, dep_time: r.dep_time, byStop: {} });
-    runs.get(key).byStop[r.stop] = r;
+    if (!runs.has(key)) runs.set(key, { train: r.train, dep_time: r.dep_time, byStop: {}, n: 0 });
+    runs.get(key).byStop[r.stop] = r; runs.get(key).n++;
   }
   return [...runs.values()].sort((a, b) => (a.dep_time < b.dep_time ? -1 : a.dep_time > b.dep_time ? 1 : 0));
 }
-// available logged dates for current direction (newest first), excluding today (live covers it)
+// canonical stop order for a segment: the longest single run we've seen (cached)
+function canonicalOrder(segKey) {
+  if (orderCache[segKey]) return orderCache[segKey];
+  const rows = STOPS.filter(r => r.segKey === segKey).concat(LIVE[segKey] || []);
+  const runs = new Map();
+  for (const r of rows) {
+    const k = r.date + "|" + r.train + "|" + r.dep_time;
+    if (!runs.has(k)) runs.set(k, []);
+    runs.get(k).push(r);
+  }
+  let best = [];
+  for (const list of runs.values()) if (list.length > best.length) best = list;
+  const order = best.slice().sort((a, b) => a.seq - b.seq).map(r => r.stop);
+  if (order.length) orderCache[segKey] = order;
+  return order;
+}
+// distinct segments seen, sorted; each {key, label}
+function availableSegments() {
+  const set = new Set(STOPS.map(r => r.segKey));
+  Object.keys(LIVE).forEach(k => set.add(k));
+  return [...set].sort((a, b) => segLabel(a).localeCompare(segLabel(b)))
+    .map(key => ({ key, label: segLabel(key) }));
+}
 function loggedDates() {
-  const set = new Set(ROWS.filter(r => r.direction === curDir && r.date !== todayISO).map(r => r.date));
+  const set = new Set(STOPS.filter(r => r.segKey === curSeg && r.date !== todayISO).map(r => r.date));
   return [...set].sort().reverse();
 }
 
 // ---------- renderers ----------
+function renderSegSelect() {
+  const sel = document.getElementById("seg");
+  const segs = availableSegments();
+  sel.innerHTML = segs.map(s => `<option value="${s.key}">${s.label}</option>`).join("");
+  if (!segs.find(s => s.key === curSeg)) curSeg = segs.length ? segs[0].key : null;
+  sel.value = curSeg || "";
+}
 function renderDaySelect() {
   const sel = document.getElementById("day");
   const dates = loggedDates();
-  const opts = [`<option value="live">Today (live)</option>`]
-    .concat(dates.map(d => `<option value="${d}">${fmtDay(d)} — ${d}</option>`));
-  sel.innerHTML = opts.join("");
+  sel.innerHTML = [`<option value="live">Today (live)</option>`]
+    .concat(dates.map(d => `<option value="${d}">${fmtDay(d)} — ${d}</option>`)).join("");
   if (curDay !== "live" && !dates.includes(curDay)) curDay = "live";
   sel.value = curDay;
 }
 
 function renderDayStats(runs) {
   const note = document.getElementById("sum-note");
-  note.textContent = `${DIR_LABEL[curDir]} · ${curDay === "live" ? "today (live)" : fmtDay(curDay)}`;
+  note.textContent = `${segLabel(curSeg)} · ${curDay === "live" ? "today (live)" : fmtDay(curDay)}`;
   note.className = "note" + (curDay === "live" ? " live" : "");
   const el = document.getElementById("day-stats");
   if (!runs.length) { el.innerHTML = `<div class="stat"><div class="k">Trains</div><div class="v">0</div></div>`; return; }
-  const order = STOP_ORDER[curDir];
-  const destName = order[order.length - 1];
+  const order = canonicalOrder(curSeg);
+  const destName = order[order.length - 1] || curSeg.split("|")[1];
   const ran = runs.filter(r => { const d = r.byStop[destName]; return d && !d.canceled; });
   const destArr = ran.map(r => r.byStop[destName].arr);
   const onTime = destArr.filter(m => m <= 0).length;
@@ -355,7 +395,7 @@ function renderDayStats(runs) {
   const g = (v, a, b) => v == null ? "" : v <= a ? "good" : v <= b ? "warn" : "bad";
   el.innerHTML = `
     <div class="stat"><div class="k">Trains</div><div class="v">${runs.length}</div></div>
-    <div class="stat"><div class="k">On time @ ${STOP_META[destName].short}</div>
+    <div class="stat"><div class="k">On time @ ${shortName(destName)}</div>
       <div class="v ${pct == null ? "" : pct >= 80 ? "good" : pct >= 50 ? "warn" : "bad"}">${pct == null ? "–" : pct + "%"}</div></div>
     <div class="stat"><div class="k">Avg arr. @ dest</div>
       <div class="v ${g(avg, 1, 3)}">${fmtAvg(avg)}${avg == null ? "" : "m"}</div></div>
@@ -367,7 +407,7 @@ function renderStopTable(runs) {
   const el = document.getElementById("stop-table");
   document.getElementById("stop-note").textContent = "avg across all trains that day";
   if (!runs.length) { el.innerHTML = `<div class="empty">No trains for this day yet.</div>`; return; }
-  const order = STOP_ORDER[curDir];
+  const order = canonicalOrder(curSeg);
   let body = "";
   for (const stop of order) {
     const cells = runs.map(r => r.byStop[stop]).filter(Boolean);
@@ -378,8 +418,9 @@ function renderStopTable(runs) {
     const onTime = arr.filter(m => m <= 0).length;
     const pct = arr.length ? Math.round(100 * onTime / arr.length) : null;
     const sched = cells.length ? cells[0] : null;
+    const via = MONITORED.has(stop) ? "" : `<span class="via">via</span>`;
     body += `<tr>
-      <td class="stopname">${STOP_META[stop] ? STOP_META[stop].full : stop}</td>
+      <td class="stopname">${fullName(stop)}${via}</td>
       <td class="sched">${sched ? (sched.sched_arr || "–") + " / " + (sched.sched_dep || "–") : "–"}</td>
       <td><span class="pill ${delayClass(aAvg)}">${fmtAvg(aAvg)}</span></td>
       <td><span class="pill ${delayClass(dAvg)}">${fmtAvg(dAvg)}</span></td>
@@ -397,8 +438,8 @@ function renderMatrix(runs) {
   const el = document.getElementById("matrix");
   document.getElementById("mx-note").textContent = `${curMetric === "arr" ? "arrival" : "departure"} delay (min) per stop`;
   if (!runs.length) { el.innerHTML = `<div class="empty">No trains for this day yet.</div>`; return; }
-  const order = STOP_ORDER[curDir];
-  const head = `<tr><th class="train">Train</th>${order.map(s => `<th>${STOP_META[s] ? STOP_META[s].short : s}</th>`).join("")}</tr>`;
+  const order = canonicalOrder(curSeg);
+  const head = `<tr><th class="train">Train</th>${order.map(s => `<th>${shortName(s)}</th>`).join("")}</tr>`;
   const rows = runs.map(run => {
     const cells = order.map(stop => {
       const c = run.byStop[stop];
@@ -413,45 +454,48 @@ function renderMatrix(runs) {
 }
 
 function renderLegend() {
-  const el = document.getElementById("legend");
   const items = [["d0", "≤0"], ["d1", "1–2"], ["d2", "3–4"], ["d3", "5–9"], ["d4", "10+"], ["dx", "cancelled"]];
-  el.innerHTML = `<span>delay (min):</span>` + items.map(([c, t]) =>
-    `<span class="sw"><span class="box ${c}"></span>${t}</span>`).join("");
+  document.getElementById("legend").innerHTML = `<span>delay (min):</span>` +
+    items.map(([c, t]) => `<span class="sw"><span class="box ${c}"></span>${t}</span>`).join("");
 }
 
 function renderHeatmap() {
   const el = document.getElementById("heatmap");
   document.getElementById("heat-note").textContent =
     `avg ${curMetric === "arr" ? "arrival" : "departure"} delay per stop, by day`;
-  const order = STOP_ORDER[curDir];
-  const dates = loggedDates().slice(0, 30).reverse();   // oldest→newest, cap 30 cols
+  const order = canonicalOrder(curSeg);
+  const dates = loggedDates().slice(0, 30).reverse();
   const cols = dates.map(d => ({ key: d, label: fmtDay(d), today: false }));
-  const liveRows = LIVE[curDir];
+  const liveRows = LIVE[curSeg];
   if (liveRows && liveRows.length) cols.push({ key: "live", label: "Today", today: true });
   if (!cols.length) { el.innerHTML = `<div class="empty">No logged days yet — history appears after the first evening run.</div>`; return; }
-
-  // avg per (stop, col)
   function avgFor(stop, colKey) {
     const rows = colKey === "live"
-      ? liveRows.filter(r => r.stop === stop && !r.canceled)
-      : ROWS.filter(r => r.direction === curDir && r.date === colKey && r.stop === stop && !r.canceled);
+      ? (liveRows || []).filter(r => r.stop === stop && !r.canceled)
+      : STOPS.filter(r => r.segKey === curSeg && r.date === colKey && r.stop === stop && !r.canceled);
     return mean(rows.map(val));
   }
   const head = `<tr><th class="stop">Stop</th>${cols.map(c => `<th class="${c.today ? "today" : ""}">${c.label}</th>`).join("")}</tr>`;
   const body = order.map(stop => {
+    const via = MONITORED.has(stop) ? "" : `<span class="via">via</span>`;
     const cells = cols.map(c => {
       const a = avgFor(stop, c.key);
       return `<td><span class="cell ${delayClass(a)}">${a == null ? "·" : fmtAvg(a)}</span></td>`;
     }).join("");
-    return `<tr><td class="stop">${STOP_META[stop] ? STOP_META[stop].full : stop}</td>${cells}</tr>`;
+    return `<tr><td class="stop">${fullName(stop)}${via}</td>${cells}</tr>`;
   }).join("");
   el.innerHTML = `<table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 // ---------- orchestration ----------
 function renderAll() {
-  const rows = currentRows();
-  const runs = groupRuns(rows);
+  if (!curSeg) {
+    for (const id of ["stop-table", "matrix", "heatmap"]) document.getElementById(id).innerHTML =
+      `<div class="empty">No tracked segments yet — they appear after the first evening run, or today once trains have run.</div>`;
+    document.getElementById("day-stats").innerHTML = "";
+    return;
+  }
+  const runs = groupRuns(currentRows());
   renderDayStats(runs);
   renderStopTable(runs);
   renderMatrix(runs);
@@ -460,18 +504,19 @@ function renderAll() {
 }
 
 async function refresh({ reloadLive = false } = {}) {
+  renderSegSelect();
   renderDaySelect();
-  // If today is selected and live not yet loaded, show spinner and fetch.
-  if (curDay === "live" && (reloadLive || !LIVE[curDir])) {
-    if (reloadLive) LIVE[curDir] = null;
+  if (curSeg && curDay === "live" && (reloadLive || !LIVE[curSeg])) {
+    if (reloadLive) { LIVE[curSeg] = undefined; delete orderCache[curSeg]; }
     for (const id of ["stop-table", "matrix"]) document.getElementById(id).innerHTML =
       `<div class="loading"><span class="spin"></span>Fetching today's trains live from iRail…</div>`;
     document.getElementById("day-stats").innerHTML = "";
-    try { await loadLive(curDir); }
+    try { await loadLive(curSeg); delete orderCache[curSeg]; }
     catch (err) {
       document.getElementById("stop-table").innerHTML = `<div class="error">Couldn't load live data: ${err.message}</div>`;
       document.getElementById("matrix").innerHTML = "";
     }
+    renderSegSelect();   // live may surface a segment not yet in history
   }
   renderAll();
   document.getElementById("updated").textContent =
@@ -479,17 +524,12 @@ async function refresh({ reloadLive = false } = {}) {
 }
 
 // ---------- events ----------
-document.getElementById("dir-seg").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b || b.dataset.dir === curDir) return;
-  curDir = b.dataset.dir;
-  for (const x of e.currentTarget.querySelectorAll("button")) x.classList.toggle("active", x === b);
-  refresh();
-});
+document.getElementById("seg").addEventListener("change", e => { curSeg = e.target.value; refresh(); });
 document.getElementById("metric-seg").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || b.dataset.metric === curMetric) return;
   curMetric = b.dataset.metric;
   for (const x of e.currentTarget.querySelectorAll("button")) x.classList.toggle("active", x === b);
-  renderAll();   // metric only affects rendering, no refetch
+  renderAll();
 });
 document.getElementById("day").addEventListener("change", e => { curDay = e.target.value; refresh(); });
 
